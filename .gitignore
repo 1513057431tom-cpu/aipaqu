@@ -1,0 +1,38 @@
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+
+# Node
+node_modules/
+.nuxt/
+.output/
+coverage/
+npm-debug.log*
+
+# Local data and generated artifacts
+storage/
+uploads/
+exports/
+logs/
+tmp/
+
+# OS and editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
