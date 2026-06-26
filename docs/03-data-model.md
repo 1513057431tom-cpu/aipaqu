@@ -51,6 +51,9 @@ erDiagram
 | --- | --- |
 | `Source` | type, name, baseUrl, allowedDomains, schedule, parserConfig, retentionDays, status |
 | `SourceCredential` | sourceId, credentialType, encryptedPayload, expiresAt, status |
+| `BrowserProfile` | sourceId, providerType, externalProfileId, encryptedConfig, proxyRef, status |
+| `SiteAdapter` | sourceId, version, entryUrls, selectorsJson, actionsJson, crawlPolicyId, status |
+| `CrawlPolicy` | name, maxPages, maxDepth, concurrency, requestDelayMs, timeoutSeconds, allowScripts, allowAttachments |
 | `CollectionJob` | sourceId/briefId, windowStart/End, cursor, status, attempt, metrics, errorCode |
 | `Document` | originType, sourceId/materialId, canonicalUrl, title, author, publishedAt, fetchedAt, contentHash, rawStorageKey, status |
 | `DocumentChunk` | documentId, sequence, text, tokenCount, embeddingRef, metadata |
@@ -127,6 +130,8 @@ erDiagram
 - `Document(canonicalUrl)` 在 URL 存在时唯一；同一正文通过 `contentHash` 去重。
 - `DeliveryRecord(idempotencyKey)` 唯一，防止重试重复发送。
 - `ReportTask(idempotencyKey)` 唯一，防止重复启动同一任务。
+- `SiteAdapter(sourceId, version)` 唯一，任务运行时固定适配器版本。
+- `BrowserProfile(sourceId, providerType, externalProfileId)` 唯一。
 
 ### 关键索引
 
@@ -136,6 +141,8 @@ erDiagram
 - `Citation(reportVersionId, sectionId, claimId)` 用于报告编辑器溯源。
 - `AuditLog(workspaceId, actorId, createdAt)` 用于审计查询。
 - `DeliveryRecord(status, createdAt)` 用于发送重试和监控。
+- `CollectionJob(sourceId, status, createdAt)` 用于采集队列和失败恢复。
+- `SiteAdapter(sourceId, status)` 用于选择当前可用适配器。
 
 ### 外键与删除
 

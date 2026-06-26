@@ -22,6 +22,7 @@
 | [部署与运维](docs/08-deployment-operations.md) | Docker Compose、配置、监控和备份 |
 | [实施路线](docs/09-implementation-roadmap.md) | 分阶段任务、检查点和完成标准 |
 | [工程基线](docs/10-engineering-baseline.md) | Git、目录结构、环境变量、Compose 草案、测试和 CI |
+| [爬虫参考设计](docs/11-crawler-reference-design.md) | 浏览器采集、站点适配器、Profile、策略和合规边界 |
 | [架构决策](docs/decisions/README.md) | ADR 索引及关键技术决策 |
 
 ## 目标技术栈

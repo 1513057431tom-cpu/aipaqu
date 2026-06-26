@@ -57,6 +57,9 @@ flowchart TB
 
 ```text
 Collector            采集 RSS、API、网页或浏览器页面
+BrowserRuntimeProvider 启动或连接本地 Playwright、远程 CDP 或外部浏览器 Profile
+SiteAdapter          描述站点入口、登录态、分页、选择器、等待和抽取策略
+CrawlPolicy          限制页面数、深度、并发、超时、脚本执行和附件下载
 ContentParser        解析网页、PDF、DOCX、表格等内容
 EmbeddingProvider    生成向量
 LLMProvider          生成、分析和审核
@@ -67,6 +70,8 @@ Exporter             DOCX、PDF、Markdown
 ```
 
 每个接口由注册表按类型加载。配置中保存实现标识和参数，不保存 Python 类路径，避免内部代码结构泄漏成公共契约。
+
+浏览器采集能力参考 `crawl4ai` 和浏览器 Profile 管理类工具的工程模式，统一抽象为 `BrowserCollector + BrowserRuntimeProvider + SiteAdapter + CrawlPolicy`。它用于授权登录采集、动态页面渲染、页面抽取和调试，不作为验证码、付费墙或访问控制绕过工具。
 
 ## 4. 关键数据流
 
@@ -93,4 +98,3 @@ flowchart LR
 - 登录凭据失效时暂停对应数据源，不进行无限重试。
 - Elasticsearch 不作为唯一事实存储；业务状态和原始文件引用保存在 MySQL。
 - Redis 数据丢失后可依据 MySQL 任务记录恢复或重新排队。
-

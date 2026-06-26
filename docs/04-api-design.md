@@ -242,9 +242,52 @@ MVP 支持：
 | DELETE | `/sources/{sourceId}` | 停用数据源 |
 | POST | `/sources/{sourceId}/test` | 测试连接和解析 |
 | POST | `/sources/{sourceId}/credentials` | 保存加密凭据 |
+| GET | `/sources/{sourceId}/browser-profiles` | 查询浏览器 Profile |
+| POST | `/sources/{sourceId}/browser-profiles` | 创建浏览器 Profile 引用 |
+| GET | `/sources/{sourceId}/site-adapters` | 查询站点适配器版本 |
+| POST | `/sources/{sourceId}/site-adapters` | 保存站点适配器草稿 |
+| POST | `/sources/{sourceId}/site-adapters/{adapterId}/test` | 测试适配器抽取结果 |
 | POST | `/sources/{sourceId}/collect` | 手动发起采集 |
 | GET | `/collection-jobs` | 查询采集任务 |
 | POST | `/collection-jobs/{jobId}/retry` | 从检查点重试 |
+
+`CreateSiteAdapterRequest`：
+
+```json
+{
+  "entryUrls": ["https://example.com/news"],
+  "allowedDomains": ["example.com"],
+  "selectors": {
+    "title": "h1",
+    "publishedAt": "time",
+    "content": "article",
+    "exclude": [".ad", ".related"]
+  },
+  "actions": [
+    {
+      "type": "WAIT_FOR_SELECTOR",
+      "selector": "article",
+      "timeoutMs": 10000
+    }
+  ],
+  "crawlPolicyId": "policy_..."
+}
+```
+
+`SiteAdapterTestResponse`：
+
+```json
+{
+  "adapterId": "adapter_...",
+  "status": "SUCCEEDED",
+  "markdownPreview": "# 标题\n\n正文摘要...",
+  "metadata": {
+    "title": "标题",
+    "publishedAt": "2026-06-26T08:00:00Z"
+  },
+  "warnings": []
+}
+```
 
 ## 5. 文档与检索
 
