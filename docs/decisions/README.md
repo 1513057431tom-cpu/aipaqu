@@ -6,3 +6,4 @@
 | [ADR-002](ADR-002-storage-responsibilities.md) | Accepted | MySQL、Redis、Elasticsearch 和文件存储分工 |
 | [ADR-003](ADR-003-versioned-workflows.md) | Accepted | 模板与工作流版本化并固定到任务 |
 | [ADR-004](ADR-004-mvp-closed-loop.md) | Accepted | 首版先交付最小可信闭环 |
+| [ADR-005](ADR-005-controlled-access-challenges.md) | Accepted | 访问挑战采用人工接管与授权记录 |

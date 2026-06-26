@@ -54,6 +54,9 @@ erDiagram
 | `BrowserProfile` | sourceId, providerType, externalProfileId, encryptedConfig, proxyRef, status |
 | `SiteAdapter` | sourceId, version, entryUrls, selectorsJson, actionsJson, crawlPolicyId, status |
 | `CrawlPolicy` | name, maxPages, maxDepth, concurrency, requestDelayMs, timeoutSeconds, allowScripts, allowAttachments |
+| `AccessGrant` | sourceId, grantType, grantedTo, purpose, licenseNote, validFrom/To, confirmedBy/At, status |
+| `AccessChallenge` | sourceId, jobId, challengeType, url, statusCode, screenshotRef, domDigest, status |
+| `ManualVerificationSession` | challengeId, browserProfileId, openedBy, expiresAt, result, auditRef |
 | `CollectionJob` | sourceId/briefId, windowStart/End, cursor, status, attempt, metrics, errorCode |
 | `Document` | originType, sourceId/materialId, canonicalUrl, title, author, publishedAt, fetchedAt, contentHash, rawStorageKey, status |
 | `DocumentChunk` | documentId, sequence, text, tokenCount, embeddingRef, metadata |
@@ -132,6 +135,8 @@ erDiagram
 - `ReportTask(idempotencyKey)` 唯一，防止重复启动同一任务。
 - `SiteAdapter(sourceId, version)` 唯一，任务运行时固定适配器版本。
 - `BrowserProfile(sourceId, providerType, externalProfileId)` 唯一。
+- `AccessGrant(sourceId, grantType, validFrom, validTo)` 防止同一来源重复配置冲突授权。
+- `ManualVerificationSession(challengeId)` 同一挑战同一时间只允许一个接管会话。
 
 ### 关键索引
 
@@ -143,6 +148,8 @@ erDiagram
 - `DeliveryRecord(status, createdAt)` 用于发送重试和监控。
 - `CollectionJob(sourceId, status, createdAt)` 用于采集队列和失败恢复。
 - `SiteAdapter(sourceId, status)` 用于选择当前可用适配器。
+- `AccessChallenge(sourceId, status, createdAt)` 用于挑战处理队列。
+- `AccessGrant(sourceId, status, validTo)` 用于判断付费或授权来源是否可采集。
 
 ### 外键与删除
 

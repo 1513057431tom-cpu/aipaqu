@@ -247,6 +247,11 @@ MVP 支持：
 | GET | `/sources/{sourceId}/site-adapters` | 查询站点适配器版本 |
 | POST | `/sources/{sourceId}/site-adapters` | 保存站点适配器草稿 |
 | POST | `/sources/{sourceId}/site-adapters/{adapterId}/test` | 测试适配器抽取结果 |
+| GET | `/sources/{sourceId}/access-grants` | 查询来源授权记录 |
+| POST | `/sources/{sourceId}/access-grants` | 创建来源授权记录 |
+| GET | `/access-challenges` | 查询访问挑战 |
+| POST | `/access-challenges/{challengeId}/manual-sessions` | 创建人工接管会话 |
+| POST | `/access-challenges/{challengeId}/resolve` | 标记挑战已人工处理 |
 | POST | `/sources/{sourceId}/collect` | 手动发起采集 |
 | GET | `/collection-jobs` | 查询采集任务 |
 | POST | `/collection-jobs/{jobId}/retry` | 从检查点重试 |
@@ -286,6 +291,35 @@ MVP 支持：
     "publishedAt": "2026-06-26T08:00:00Z"
   },
   "warnings": []
+}
+```
+
+`CreateAccessGrantRequest`：
+
+```json
+{
+  "grantType": "PAID_SUBSCRIPTION",
+  "grantedTo": "workspace",
+  "purpose": "生成行业周报",
+  "licenseNote": "用户确认该账号拥有访问和内部分析授权",
+  "validFrom": "2026-06-26",
+  "validTo": "2027-06-25"
+}
+```
+
+`AccessChallengeResponse`：
+
+```json
+{
+  "id": "challenge_...",
+  "sourceId": "src_...",
+  "jobId": "job_...",
+  "challengeType": "CAPTCHA_REQUIRED",
+  "url": "https://example.com/article",
+  "statusCode": 200,
+  "status": "WAITING_HUMAN",
+  "screenshotUrl": "/api/v1/access-challenges/challenge_.../screenshot",
+  "createdAt": "2026-06-26T08:00:00Z"
 }
 ```
 
