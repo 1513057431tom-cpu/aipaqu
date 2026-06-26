@@ -1,0 +1,17 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  background: #f7f8fa;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+a {
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+

@@ -1,0 +1,99 @@
+services:
+  api:
+    build:
+      context: ./backend
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "8000:8000"
+    depends_on:
+      - mysql
+      - redis
+      - elasticsearch
+    volumes:
+      - file_storage:/app/storage
+
+  frontend:
+    build:
+      context: ./frontend
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NUXT_PUBLIC_API_BASE: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+  worker:
+    build:
+      context: ./backend
+    env_file:
+      - path: .env
+        required: false
+    command: ["python", "-m", "app.worker"]
+    profiles: ["workers"]
+    depends_on:
+      - redis
+      - mysql
+
+  crawler-worker:
+    build:
+      context: ./backend
+    env_file:
+      - path: .env
+        required: false
+    command: ["python", "-m", "app.worker"]
+    profiles: ["workers"]
+    depends_on:
+      - redis
+      - mysql
+
+  beat:
+    build:
+      context: ./backend
+    env_file:
+      - path: .env
+        required: false
+    command: ["python", "-m", "app.worker"]
+    profiles: ["workers"]
+    depends_on:
+      - redis
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-intelligence_reports}
+      MYSQL_USER: ${MYSQL_USER:-app}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-change-me}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-change-root-me}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.14.0
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+
+volumes:
+  mysql_data:
+  redis_data:
+  elasticsearch_data:
+  file_storage:

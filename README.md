@@ -6,7 +6,34 @@
 
 ## 当前阶段
 
-项目当前处于“文档与架构设计”阶段。开始业务实现前，应先评审并确认 `docs/` 中的产品、架构、数据和接口设计。
+项目当前进入“可运行基础”阶段。仓库已包含 FastAPI 后端骨架、Nuxt 前端骨架、Docker Compose 和健康检查；下一步是登录、会话和 `ADMIN`/`EDITOR` 权限。
+
+## Quick Start
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+本地开发：
+
+```bash
+cd backend
+python -m pytest
+
+cd ../frontend
+npm install
+npm run dev
+```
+
+## Commands
+
+| 命令 | 说明 |
+| --- | --- |
+| `python -m pytest` | 在 `backend/` 运行后端测试 |
+| `npm test` | 在 `frontend/` 运行 Nuxt 类型检查 |
+| `npm run build` | 在 `frontend/` 构建 Nuxt 应用 |
+| `docker compose up --build` | 启动 API、前端、MySQL、Redis 和 Elasticsearch |
 
 ## 文档导航
 
