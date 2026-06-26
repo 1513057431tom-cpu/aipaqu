@@ -1,6 +1,7 @@
 from functools import lru_cache
 
 from pydantic import Field
+from pydantic import computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -9,6 +10,12 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     app_env: str = Field(default="development", alias="APP_ENV")
     app_timezone: str = Field(default="Asia/Shanghai", alias="APP_TIMEZONE")
+    allowed_origins_raw: str = Field(
+        default="http://localhost:3000,http://127.0.0.1:3000",
+        alias="ALLOWED_ORIGINS",
+    )
+    dev_admin_email: str = Field(default="admin@example.com", alias="DEV_ADMIN_EMAIL")
+    dev_admin_password: str = Field(default="change-me-now", alias="DEV_ADMIN_PASSWORD")
 
     mysql_host: str = Field(default="localhost", alias="MYSQL_HOST")
     mysql_port: int = Field(default=3306, alias="MYSQL_PORT")
@@ -24,8 +31,16 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    @computed_field
+    @property
+    def allowed_origins(self) -> list[str]:
+        return [
+            origin.strip()
+            for origin in self.allowed_origins_raw.split(",")
+            if origin.strip()
+        ]
+
 
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-
