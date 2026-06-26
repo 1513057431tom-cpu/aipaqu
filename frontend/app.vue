@@ -18,7 +18,11 @@
             <p class="text-sm text-slate-500">MVP 工作台</p>
             <h2 class="mt-1 text-2xl font-semibold">可追溯报告生产闭环</h2>
           </div>
-          <button class="h-10 rounded-md bg-accent px-4 text-sm font-medium text-white">
+          <button
+            class="h-10 rounded-md bg-accent px-4 text-sm font-medium text-white disabled:opacity-60"
+            :disabled="!currentUser"
+            @click="focusBriefForm"
+          >
             新建 ResearchBrief
           </button>
         </header>
@@ -56,6 +60,106 @@
                   </span>
                 </li>
               </ol>
+            </section>
+
+            <section class="rounded-md border border-slate-200 bg-white p-4">
+              <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <h3 class="font-semibold">采集需求工作台</h3>
+                  <p class="mt-1 text-sm text-slate-500">
+                    先建立 ResearchBrief，后续上传资料和运行报告任务都会挂在这里。
+                  </p>
+                </div>
+                <span class="rounded-md bg-slate-100 px-2.5 py-1 text-sm text-slate-600">
+                  {{ briefs.length }} 个 Brief
+                </span>
+              </div>
+
+              <form
+                ref="briefFormElement"
+                class="mt-4 grid gap-3 md:grid-cols-2"
+                @submit.prevent="createBrief"
+              >
+                <label class="block text-sm md:col-span-2">
+                  <span class="font-medium">标题</span>
+                  <input
+                    v-model="briefForm.title"
+                    class="mt-1 h-10 w-full rounded-md border border-slate-300 px-3"
+                    :disabled="!currentUser"
+                    maxlength="120"
+                  >
+                </label>
+                <label class="block text-sm md:col-span-2">
+                  <span class="font-medium">目标说明</span>
+                  <textarea
+                    v-model="briefForm.objective"
+                    class="mt-1 min-h-24 w-full rounded-md border border-slate-300 px-3 py-2"
+                    :disabled="!currentUser"
+                    maxlength="2000"
+                  />
+                </label>
+                <label class="block text-sm">
+                  <span class="font-medium">日期模式</span>
+                  <select
+                    v-model="briefForm.dateKind"
+                    class="mt-1 h-10 w-full rounded-md border border-slate-300 px-3"
+                    :disabled="!currentUser"
+                  >
+                    <option value="DAY">单日</option>
+                    <option value="WEEK">自然周</option>
+                    <option value="MONTH">自然月</option>
+                  </select>
+                </label>
+                <label class="block text-sm">
+                  <span class="font-medium">参考日期</span>
+                  <input
+                    v-model="briefForm.referenceDate"
+                    class="mt-1 h-10 w-full rounded-md border border-slate-300 px-3"
+                    :disabled="!currentUser"
+                    type="date"
+                  >
+                </label>
+                <label class="block text-sm md:col-span-2">
+                  <span class="font-medium">必答问题</span>
+                  <input
+                    v-model="briefForm.requiredQuestion"
+                    class="mt-1 h-10 w-full rounded-md border border-slate-300 px-3"
+                    :disabled="!currentUser"
+                    placeholder="例如：本周市场最重要的变化是什么？"
+                  >
+                </label>
+                <p v-if="briefError" class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 md:col-span-2">
+                  {{ briefError }}
+                </p>
+                <button
+                  class="h-10 rounded-md bg-accent px-4 text-sm font-medium text-white disabled:opacity-60 md:col-span-2"
+                  :disabled="!currentUser || briefLoading"
+                  type="submit"
+                >
+                  {{ briefLoading ? "创建中..." : "创建 Brief" }}
+                </button>
+              </form>
+
+              <div class="mt-5 divide-y divide-slate-200 rounded-md border border-slate-200">
+                <div v-if="briefs.length === 0" class="px-4 py-5 text-sm text-slate-500">
+                  {{ currentUser ? "还没有 Brief，创建一个开始。" : "登录后可以创建 Brief。" }}
+                </div>
+                <article
+                  v-for="brief in briefs"
+                  :key="brief.id"
+                  class="px-4 py-3"
+                >
+                  <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <p class="font-medium">{{ brief.title }}</p>
+                      <p class="mt-1 text-sm text-slate-500">{{ brief.objective }}</p>
+                    </div>
+                    <span class="w-fit rounded-md bg-slate-100 px-2.5 py-1 text-sm text-slate-600">
+                      {{ brief.status }}
+                    </span>
+                  </div>
+                </article>
+              </div>
             </section>
           </section>
 
@@ -138,14 +242,49 @@ type UserEnvelope = {
   user: PublicUser
 }
 
+type DateRangeKind = "DAY" | "WEEK" | "MONTH"
+
+type ResearchBrief = {
+  id: string
+  workspaceId: string
+  title: string
+  objective: string
+  requiredQuestions: string[]
+  dateRange: {
+    kind: DateRangeKind
+    referenceDate: string | null
+    startDate: string | null
+    endDate: string | null
+    timezone: string
+  }
+  status: "DRAFT" | "READY" | "ARCHIVED"
+  createdAt: string
+  updatedAt: string
+}
+
+type BriefListEnvelope = {
+  data: ResearchBrief[]
+}
+
 const config = useRuntimeConfig()
 const apiBase = config.public.apiBase
 const authLoading = ref(false)
 const authError = ref("")
 const currentUser = ref<PublicUser | null>(null)
+const briefs = ref<ResearchBrief[]>([])
+const briefLoading = ref(false)
+const briefError = ref("")
+const briefFormElement = ref<HTMLFormElement | null>(null)
 const loginForm = reactive({
   email: "admin@example.com",
   password: "change-me-now",
+})
+const briefForm = reactive({
+  title: "新能源汽车行业周报",
+  objective: "分析价格、销量、政策和重点企业动态",
+  dateKind: "WEEK" as DateRangeKind,
+  referenceDate: new Date().toISOString().slice(0, 10),
+  requiredQuestion: "本周市场最重要的变化是什么？",
 })
 
 const sessionLabel = computed(() => currentUser.value ? "已登录" : "未登录")
@@ -164,9 +303,20 @@ async function refreshCurrentUser() {
   try {
     const result = await request<UserEnvelope>("/api/v1/auth/me")
     currentUser.value = result.user
+    await refreshBriefs()
   } catch {
     currentUser.value = null
+    briefs.value = []
   }
+}
+
+async function refreshBriefs() {
+  if (!currentUser.value) {
+    briefs.value = []
+    return
+  }
+  const result = await request<BriefListEnvelope>("/api/v1/briefs")
+  briefs.value = result.data
 }
 
 async function login() {
@@ -178,6 +328,7 @@ async function login() {
       body: loginForm,
     })
     currentUser.value = result.user
+    await refreshBriefs()
   } catch {
     authError.value = "登录失败，请检查账号和密码。"
   } finally {
@@ -188,12 +339,46 @@ async function login() {
 async function logout() {
   await request<void>("/api/v1/auth/logout", { method: "POST" })
   currentUser.value = null
+  briefs.value = []
 }
 
 onMounted(refreshCurrentUser)
 
+function focusBriefForm() {
+  briefFormElement.value?.scrollIntoView({ behavior: "smooth", block: "start" })
+}
+
+async function createBrief() {
+  if (!currentUser.value) {
+    briefError.value = "请先登录。"
+    return
+  }
+  briefLoading.value = true
+  briefError.value = ""
+  try {
+    await request<ResearchBrief>("/api/v1/briefs", {
+      method: "POST",
+      body: {
+        title: briefForm.title,
+        objective: briefForm.objective,
+        requiredQuestions: [briefForm.requiredQuestion],
+        dateRange: {
+          kind: briefForm.dateKind,
+          referenceDate: briefForm.referenceDate,
+          timezone: "Asia/Shanghai",
+        },
+      },
+    })
+    await refreshBriefs()
+  } catch {
+    briefError.value = "创建 Brief 失败，请检查字段是否完整。"
+  } finally {
+    briefLoading.value = false
+  }
+}
+
 const metrics = computed(() => [
-  { label: "资料来源", value: "0", hint: currentUser.value ? "等待上传或授权采集" : "登录后创建来源" },
+  { label: "采集需求", value: String(briefs.value.length), hint: currentUser.value ? "已创建 Brief 数量" : "登录后创建 Brief" },
   { label: "报告任务", value: "0", hint: "MVP 工作流待接入" },
   { label: "待处理挑战", value: "0", hint: "验证码/登录/授权人工接管" },
 ])
@@ -219,4 +404,3 @@ const roadmap = [
   },
 ]
 </script>
-
