@@ -88,9 +88,9 @@ erDiagram
 | --- | --- |
 | `DeliveryConfig` | type, name, encryptedConfig, sender, status |
 | `DeliveryRecord` | configId, reportVersionId, recipients, subject, attachmentRefs, idempotencyKey, status, attempts |
-| `WorkflowDefinition` | key, version, graphJson, limits, status |
+| `WorkflowDefinition` | key, version, engineType, definitionJson, limits, status |
 | `AgentDefinition` | key, provider, model, promptVersion, toolPolicy, limits |
-| `WorkflowRun` | taskId, workflowVersion, status, stateRef, startedAt, finishedAt |
+| `WorkflowRun` | taskId, workflowVersion, engineType, engineRunRef, status, stateRef, startedAt, finishedAt |
 | `WorkflowNodeRun` | runId, nodeKey, inputDigest, outputRef, status, tokens, durationMs, errorCode |
 | `AuditLog` | actorId, action, resourceType, resourceId, result, metadata, createdAt |
 

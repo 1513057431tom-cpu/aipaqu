@@ -43,7 +43,7 @@ npm run dev
 | [系统架构](docs/02-system-architecture.md) | 分层架构、组件边界和数据流 |
 | [数据模型](docs/03-data-model.md) | 核心实体、关系、状态和存储分工 |
 | [API 设计](docs/04-api-design.md) | REST、WebSocket、分页、错误和幂等约定 |
-| [LangGraph 工作流](docs/05-langgraph-workflow.md) | Agent 节点、状态、返工与恢复策略 |
+| [工作流执行引擎](docs/05-workflow-engine.md) | 节点契约、状态、返工、适配器与恢复策略 |
 | [前端信息架构](docs/06-frontend-ux.md) | 页面结构和关键交互 |
 | [安全与合规](docs/07-security.md) | 凭据、SSRF、上传、提示注入和审计 |
 | [部署与运维](docs/08-deployment-operations.md) | Docker Compose、配置、监控和备份 |
@@ -56,7 +56,7 @@ npm run dev
 
 - Nuxt 3、Vue 3、Tailwind CSS、ECharts
 - FastAPI、SQLAlchemy、Celery
-- LangGraph、LangChain
+- 平台工作流引擎契约，可选适配 LangGraph、Temporal、Prefect 或自研执行器
 - DeepSeek 默认模型，可切换模型供应商
 - MySQL、Redis、Elasticsearch 8.x
 - Playwright、RSS、HTTP API 采集器
@@ -68,7 +68,7 @@ npm run dev
 - 网络资料、用户文档和用户数据必须在同一分析流程中使用。
 - 每条关键结论和每个图表数字都必须可追溯。
 - 报告默认先生成草稿，必须经过人工审核才能发布。
-- 采集器、模型、Agent、存储和交付通道均通过稳定接口扩展。
+- 采集器、模型、Agent、工作流执行器、存储和交付通道均通过稳定接口扩展。
 
 ## MVP 闭环
 

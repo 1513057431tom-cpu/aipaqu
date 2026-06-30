@@ -1,6 +1,19 @@
-# LangGraph 工作流
+# 工作流执行引擎
 
-## 1. 工作流总览
+## 1. 设计定位
+
+平台核心不绑定 LangGraph 或 LangChain。商业化后的关键资产是稳定的业务状态机、节点输入输出契约、审计记录、成本控制和可恢复能力；具体执行框架只作为可替换适配器。
+
+首版实现应优先建设平台自己的 `WorkflowEngine` 契约：
+
+- `WorkflowDefinition`：声明节点、依赖、条件分支、预算、超时和版本。
+- `WorkflowRun`：记录一次任务执行的状态、当前节点、检查点和恢复信息。
+- `WorkflowNode`：以结构化 Schema 接收输入并输出引用，不通过自由文本传递关键状态。
+- `WorkflowEngineAdapter`：封装具体执行器，可接入自研执行器、LangGraph、Temporal、Prefect 或其他商业工作流系统。
+
+LangGraph/LangChain 可以作为研发期或特定客户部署的适配器，但不得出现在 API、数据库公共字段、前端文案或插件契约中成为不可替换依赖。
+
+## 2. 工作流总览
 
 ```mermaid
 flowchart TD
@@ -9,7 +22,7 @@ flowchart TD
     P["3 Preprocess\n正文抽取、标准化、时间过滤"]
     D["4 Deduplicate\nURL / SimHash / Embedding"]
     CL["5 Cluster\n主题与事件聚类"]
-    R["6 Research\nES 混合检索、重排、上传资料召回"]
+    R["6 Research\n混合检索、重排、上传资料召回"]
     A["7 Analyze\n事实、指标、趋势、异常和冲突"]
     S["8 Summarize\n按照模板分章节生成"]
     V["9 Review\n引用、数字、规则和幻觉审核"]
@@ -28,7 +41,32 @@ flowchart TD
 
 自动审核最多返工三次；超过上限后进入 `WAITING_HUMAN`，不得继续自动循环。
 
-## 2. 工作流状态
+## 3. 引擎契约
+
+```python
+class WorkflowEngine:
+    def start(self, definition: WorkflowDefinition, input: WorkflowInput) -> WorkflowRunRef: ...
+    def resume(self, run_id: str, from_node: str | None = None) -> WorkflowRunRef: ...
+    def cancel(self, run_id: str, reason: str) -> None: ...
+    def get_state(self, run_id: str) -> WorkflowRunState: ...
+
+class WorkflowNode:
+    key: str
+    input_schema: type
+    output_schema: type
+
+    def run(self, context: NodeContext, input: object) -> NodeResult: ...
+```
+
+执行器必须遵守以下约束：
+
+- 节点输入输出必须可序列化、可校验、可审计。
+- 节点完成后先持久化输出引用，再推进下一节点。
+- 大正文、二进制内容和网页快照只保存数据库或文件存储引用。
+- 条件分支、返工、重试和人工等待必须落入统一状态机。
+- 任何模型调用、采集调用和外部工具调用必须受预算、超时、权限白名单和审计控制。
+
+## 4. 工作流状态
 
 ```python
 ReportState = {
@@ -50,9 +88,9 @@ ReportState = {
 }
 ```
 
-大正文和二进制内容不直接保存在 Graph State 中，只保存数据库或文件存储引用，避免检查点过大。
+`ReportState` 是平台状态，不是某个第三方框架的 checkpoint 格式。适配器可以在内部使用自己的 checkpoint，但必须能恢复成平台状态。
 
-## 3. 节点定义
+## 5. 节点定义
 
 ### Brief
 
@@ -90,7 +128,7 @@ ReportState = {
 
 ### Research
 
-- Elasticsearch BM25、向量检索和结构化过滤混合召回。
+- BM25、向量检索和结构化过滤混合召回。
 - 将用户上传材料和数据集纳入同一证据池。
 - 重排后为每个必答问题选择证据。
 - 检索结果中的网页指令只作为内容，不作为系统命令。
@@ -123,19 +161,19 @@ ReportState = {
 - Export 从同一中间表示生成 DOCX、PDF 和 Markdown。
 - Dispatch 使用独立幂等键发送邮件，避免工作流重试导致重复发送。
 
-## 4. 检查点与恢复
+## 6. 检查点与恢复
 
 每个节点记录：
 
 - 输入摘要和输出引用。
 - 开始、结束和耗时。
-- 模型、Prompt 和工具版本。
+- 模型、Prompt、工具和执行器版本。
 - Token、请求次数和预算。
 - 状态、错误代码和可否重试。
 
 重试默认从失败节点开始。只有上游数据版本变化时，才使下游检查点失效。
 
-## 5. 预算与安全边界
+## 7. 预算与安全边界
 
 - 最大模型调用次数。
 - 最大输入与输出 Token。
@@ -144,3 +182,14 @@ ReportState = {
 - 单来源抓取页面数和请求速率。
 - Agent 工具白名单；模型不能自行扩大权限。
 
+## 8. 适配器选择标准
+
+选择或替换执行器时，必须评估：
+
+- 是否支持可恢复检查点和人工等待。
+- 是否能输出平台统一的节点运行记录。
+- 是否能独立控制预算、并发、重试和超时。
+- 是否会把第三方框架对象泄漏到数据库、API 或前端。
+- 是否便于商业部署、私有化交付、观测和问题定位。
+
+若某个框架不满足这些条件，应使用平台自研执行器或更适合的工作流系统承载核心流程。

@@ -104,7 +104,7 @@
 - 文档、文本、URL 清单和结构化数据上传；MVP 可先将 URL 清单作为用户资料保存，不强制联网采集。
 - 用户资料解析、清洗、时间过滤、去重和可检索文本化。
 - 手工创建或编辑报告规则版本；范例文档自动抽取可延后。
-- LangGraph 报告工作流的核心节点：Brief、Preprocess、Research、Analyze、Summarize、Review、Compose、Human Review、Export。
+- 平台报告工作流的核心节点：Brief、Preprocess、Research、Analyze、Summarize、Review、Compose、Human Review、Export；具体执行器不得成为业务 API 或数据库公共契约。
 - 报告编辑、引用溯源、人工审核和单章节重生成。
 - Markdown 和 DOCX 导出。
 
@@ -137,7 +137,7 @@
 - 导出 Markdown 和 DOCX 后，标题、章节、引用和人工修改内容保持一致。
 - 报告生成失败可从失败节点继续，不必重新采集全部数据。
 - 幂等重试不会重复生成报告版本。
-- 新增采集器、模型供应商、Agent 节点或交付通道不需要修改核心业务流程。
+- 新增采集器、模型供应商、Agent 节点、工作流执行器或交付通道不需要修改核心业务流程。
 
 ### 增强功能验收
 

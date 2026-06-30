@@ -8,7 +8,7 @@
 - [x] 系统架构与扩展边界。
 - [x] 数据模型与状态机。
 - [x] API 契约。
-- [x] LangGraph 工作流。
+- [x] 工作流执行引擎契约。
 - [x] 前端信息架构。
 - [x] 安全、部署和运维方案。
 - [ ] 用户评审并确认文档基线。
@@ -34,8 +34,8 @@
 
 ## 阶段 3：MVP 报告工作流
 
-- 实现 Brief、Preprocess、Research、Analyze、Summarize、Review、Compose、Human Review、Export 节点。
-- 实现节点状态、预算、自动返工上限和失败节点恢复。
+- 实现框架中立的 `WorkflowEngine`、`WorkflowNode` 和 Brief、Preprocess、Research、Analyze、Summarize、Review、Compose、Human Review、Export 节点。
+- 实现节点状态、预算、自动返工上限和失败节点恢复；不得把 LangGraph/LangChain 对象作为数据库或 API 契约。
 - 接入 DeepSeek Provider 和 Embedding Provider 的稳定接口；MVP 可使用简单本地检索或数据库检索替代完整混合检索。
 - 实现带 `claimId`、引用和来源摘要的报告草稿。
 
