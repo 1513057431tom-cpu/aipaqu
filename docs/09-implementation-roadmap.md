@@ -35,6 +35,8 @@
 ## 阶段 3：MVP 报告工作流
 
 - 实现框架中立的 `WorkflowEngine`、`WorkflowNode` 和 Brief、Preprocess、Research、Analyze、Summarize、Review、Compose、Human Review、Export 节点。
+- 实现 `Period Input` 节点：日报走采集/分析，周报/月报默认聚合已审核或已发布日报快照。
+- 周报/月报缺失日报时返回缺失日期并等待人工选择，不得自动打开浏览器或进入采集节点。
 - 实现节点状态、预算、自动返工上限和失败节点恢复；不得把 LangGraph/LangChain 对象作为数据库或 API 契约。
 - 接入 DeepSeek Provider 和 Embedding Provider 的稳定接口；MVP 可使用简单本地检索或数据库检索替代完整混合检索。
 - 实现带 `claimId`、引用和来源摘要的报告草稿。

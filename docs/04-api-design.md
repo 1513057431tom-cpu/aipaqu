@@ -383,6 +383,44 @@ MVP 支持：
 | PATCH | `/charts/{chartId}` | 编辑图表 |
 | POST | `/charts/{chartId}/render` | 渲染图表图片 |
 
+`CreateReportTaskRequest`：
+
+```json
+{
+  "briefId": "brief_...",
+  "templateVersionId": "tplv_...",
+  "reportPeriod": "WEEKLY",
+  "periodStart": "2026-06-22",
+  "periodEnd": "2026-06-28",
+  "inputMode": "AGGREGATE_DAILY_SNAPSHOTS",
+  "allowBackfillDailyReports": false,
+  "idempotencyKey": "report-task:brief_...:2026-W26"
+}
+```
+
+约束：
+
+- `reportPeriod=DAILY` 默认 `inputMode=COLLECT_AND_ANALYZE`。
+- `reportPeriod=WEEKLY` 或 `MONTHLY` 默认 `inputMode=AGGREGATE_DAILY_SNAPSHOTS`。
+- 周报/月报创建任务时只读取覆盖日期内已审核或已发布的日报 `ReportVersion` 快照。
+- 当日报快照缺失且 `allowBackfillDailyReports=false` 时返回 `409 PERIOD_INPUT_INCOMPLETE`，响应中包含 `missingDates`。
+- 即使 `allowBackfillDailyReports=true`，也只能创建“补生成日报”任务；不得在周报/月报点击动作中直接打开浏览器。
+
+`PeriodInputIncompleteResponse`：
+
+```json
+{
+  "error": {
+    "code": "PERIOD_INPUT_INCOMPLETE",
+    "message": "Weekly or monthly report requires daily report snapshots.",
+    "details": {
+      "missingDates": ["2026-06-24", "2026-06-25"],
+      "requiredStatus": ["APPROVED", "PUBLISHED"]
+    }
+  }
+}
+```
+
 `ReportDetailResponse`：
 
 ```json
@@ -405,8 +443,18 @@ MVP 支持：
       ]
     },
     "markdown": "# 新能源汽车行业周报\n\n...",
+    "htmlSnapshotRef": "files/reports/rpv_.../snapshot.html",
     "changeSource": "AI_DRAFT"
   },
+  "inputSnapshots": [
+    {
+      "sourceReportId": "report_daily_...",
+      "sourceVersionId": "rpv_daily_...",
+      "sourcePeriod": "DAILY",
+      "coveredDate": "2026-06-24",
+      "htmlSnapshotRef": "files/reports/rpv_daily_.../snapshot.html"
+    }
+  ],
   "citations": [
     {
       "claimId": "claim_1",

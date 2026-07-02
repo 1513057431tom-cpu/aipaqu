@@ -76,9 +76,10 @@ erDiagram
 | --- | --- |
 | `RuleTemplate` | name, reportType, status, activeVersionId |
 | `RuleTemplateVersion` | version, sourceFiles, structureJson, styleJson, citationRules, chartRules, publishedAt |
-| `ReportTask` | briefId, templateVersionId, scheduleType, idempotencyKey, status, currentNode, budget |
-| `Report` | taskId, title, periodStart/End, status, currentVersionId, approvedBy/At |
-| `ReportVersion` | reportId, version, contentJson, markdown, changeSource, createdBy |
+| `ReportTask` | briefId, templateVersionId, reportPeriod, inputMode, scheduleType, idempotencyKey, status, currentNode, budget |
+| `Report` | taskId, title, reportPeriod, periodStart/End, status, currentVersionId, approvedBy/At |
+| `ReportVersion` | reportId, version, contentJson, markdown, htmlSnapshotRef, changeSource, createdBy |
+| `ReportInputSnapshot` | taskId, sourceReportId, sourceVersionId, sourcePeriod, coveredDate, htmlSnapshotRef, contentDigest |
 | `Citation` | reportVersionId, sectionId, claimId, documentId/chunkId, quoteDigest, relevanceScore |
 | `Chart` | reportVersionId, datasetId, title, type, datasetSnapshot, optionJson, sourceRefs |
 
@@ -110,6 +111,13 @@ erDiagram
 
 `WAITING_HUMAN` 表示自动生成已经完成但需要人工处理，例如自动审核超过返工上限、需要补充来源或等待编辑审核。
 
+`reportPeriod` 取值为 `DAILY`、`WEEKLY`、`MONTHLY` 或 `CUSTOM`。`inputMode` 取值：
+
+- `COLLECT_AND_ANALYZE`：日报或自定义任务使用，可进入采集、解析和检索流程。
+- `AGGREGATE_DAILY_SNAPSHOTS`：周报/月报默认使用，只读取日报快照，不触发浏览器采集。
+
+当 `reportPeriod` 为 `WEEKLY` 或 `MONTHLY` 时，默认 `inputMode` 必须为 `AGGREGATE_DAILY_SNAPSHOTS`。如果缺少覆盖日期内的日报快照，任务不得自动进入 `Collect`，应进入 `WAITING_HUMAN` 并记录缺失日期。
+
 ### Report
 
 `DRAFT → IN_REVIEW → APPROVED → PUBLISHED → ARCHIVED`
@@ -130,6 +138,7 @@ erDiagram
 - `ResearchBrief(workspaceId, title, deletedAt)` 在未删除记录中唯一。
 - `RuleTemplateVersion(templateId, version)` 唯一。
 - `ReportVersion(reportId, version)` 唯一。
+- `ReportInputSnapshot(taskId, sourceVersionId)` 唯一，防止同一日报版本被重复纳入周期汇总。
 - `Document(canonicalUrl)` 在 URL 存在时唯一；同一正文通过 `contentHash` 去重。
 - `DeliveryRecord(idempotencyKey)` 唯一，防止重试重复发送。
 - `ReportTask(idempotencyKey)` 唯一，防止重复启动同一任务。
@@ -141,9 +150,11 @@ erDiagram
 ### 关键索引
 
 - `ReportTask(status, createdAt)` 用于队列和监控。
+- `Report(reportPeriod, periodStart, periodEnd, status)` 用于查找周期内已审核或已发布日报。
 - `WorkflowNodeRun(runId, nodeKey, status)` 用于恢复和节点追踪。
 - `Document(publishedAt, originType, status)` 用于时间窗口过滤。
 - `Citation(reportVersionId, sectionId, claimId)` 用于报告编辑器溯源。
+- `ReportInputSnapshot(taskId, coveredDate)` 用于周报/月报检查日报覆盖情况。
 - `AuditLog(workspaceId, actorId, createdAt)` 用于审计查询。
 - `DeliveryRecord(status, createdAt)` 用于发送重试和监控。
 - `CollectionJob(sourceId, status, createdAt)` 用于采集队列和失败恢复。

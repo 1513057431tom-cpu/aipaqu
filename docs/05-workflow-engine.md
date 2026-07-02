@@ -18,8 +18,10 @@ LangGraph/LangChain 可以作为研发期或特定客户部署的适配器，但
 ```mermaid
 flowchart TD
     B["1 Brief\n读取采集需求、日期和用户资料"]
-    C["2 Collect\nRSS / API / 静态网页 / 登录网页"]
-    P["3 Preprocess\n正文抽取、标准化、时间过滤"]
+    G["2 Period Input\n解析日报/周报/月报输入源"]
+    C["3 Collect\nRSS / API / 静态网页 / 登录网页"]
+    DS["3 Daily Snapshots\n读取日报 HTML/内容快照"]
+    P["4 Preprocess\n正文抽取、标准化、时间过滤"]
     D["4 Deduplicate\nURL / SimHash / Embedding"]
     CL["5 Cluster\n主题与事件聚类"]
     R["6 Research\n混合检索、重排、上传资料召回"]
@@ -31,7 +33,10 @@ flowchart TD
     E["12 Export\nDOCX / PDF / Markdown"]
     DI["13 Dispatch\nSMTP / 下载归档"]
 
-    B --> C --> P --> D --> CL --> R --> A --> S --> V
+    B --> G
+    G -->|DAILY/CUSTOM| C --> P
+    G -->|WEEKLY/MONTHLY| DS --> R
+    P --> D --> CL --> R --> A --> S --> V
     V -->|通过| CO
     V -->|未通过且可返工| R
     CO --> H
@@ -73,8 +78,12 @@ ReportState = {
     "taskId": str,
     "briefId": str,
     "templateVersionId": str,
+    "reportPeriod": "DAILY | WEEKLY | MONTHLY | CUSTOM",
+    "inputMode": "COLLECT_AND_ANALYZE | AGGREGATE_DAILY_SNAPSHOTS",
     "collectionWindow": DateWindow,
     "analysisWindow": DateWindow,
+    "dailySnapshotRefs": list[str],
+    "missingDailyDates": list[str],
     "documentIds": list[str],
     "clusterRefs": list[str],
     "evidenceRefs": list[str],
@@ -99,12 +108,29 @@ ReportState = {
 - 固化模板版本、工作流版本和模型配置。
 - 生成任务预算和幂等键。
 
+### Period Input
+
+- 根据 `reportPeriod` 决定输入模式。
+- `DAILY` 和需要新资料的 `CUSTOM` 任务进入 `COLLECT_AND_ANALYZE`。
+- `WEEKLY` 和 `MONTHLY` 默认进入 `AGGREGATE_DAILY_SNAPSHOTS`，只读取周期内日报快照。
+- 周报/月报缺少日报快照时记录 `missingDailyDates`，任务进入 `WAITING_HUMAN`，不得自动启动浏览器。
+- 只有用户明确创建补生成日报任务或重新采集任务时，后续任务才可以进入 `Collect`。
+
 ### Collect
 
 - 根据来源类型路由到 Collector。
 - 使用域名白名单、限速和 robots/站点规则。
 - 登录态失效时标记凭据异常并暂停该来源。
 - 输出原始文档引用和采集统计。
+
+`Collect` 不属于周报/月报默认路径。周报/月报点击动作不得直接触发 `BrowserCollector` 或打开受控浏览器。
+
+### Daily Snapshots
+
+- 查询周期内状态为 `APPROVED` 或 `PUBLISHED` 的日报版本。
+- 读取每个日报的 `contentJson`、Markdown/HTML 快照、引用摘要和内容摘要。
+- 生成 `ReportInputSnapshot` 记录，固化本次周报/月报使用的日报版本。
+- 不重新抓取日报中的外部来源，不执行浏览器脚本。
 
 ### Preprocess
 
