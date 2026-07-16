@@ -2,7 +2,7 @@
 
 ## 状态
 
-Accepted
+Superseded by [ADR-008](ADR-008-internal-external-material-intelligence.md)
 
 ## 日期
 

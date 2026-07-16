@@ -15,36 +15,35 @@ LangGraph/LangChain 可以作为研发期或特定客户部署的适配器，但
 
 ## 2. 工作流总览
 
+平台有三类相互独立但通过持久化快照衔接的流程：
+
+1. 内部同步流程定时读取企业数据并生成结构化快照。
+2. 外部采集流程定时获取页面、保存证据并生成变化信号。
+3. 情报与报告流程消费已经固化的快照和信号，不把采集行为隐藏在报告点击动作中。
+
 ```mermaid
 flowchart TD
-    B["1 Brief\n读取采集需求、日期和用户资料"]
-    G["2 Period Input\n解析日报/周报/月报输入源"]
-    C["3 Collect\nRSS / API / 静态网页 / 登录网页"]
-    DS["3 Daily Snapshots\n读取日报 HTML/内容快照"]
-    P["4 Preprocess\n正文抽取、标准化、时间过滤"]
-    D["4 Deduplicate\nURL / SimHash / Embedding"]
-    CL["5 Cluster\n主题与事件聚类"]
-    R["6 Research\n混合检索、重排、上传资料召回"]
-    A["7 Analyze\n事实、指标、趋势、异常和冲突"]
-    S["8 Summarize\n按照模板分章节生成"]
-    V["9 Review\n引用、数字、规则和幻觉审核"]
-    CO["10 Compose\n正文、引用、表格和图表组合"]
-    H["11 Human Review\n人工编辑与审核"]
-    E["12 Export\nDOCX / PDF / Markdown"]
-    DI["13 Dispatch\nSMTP / 下载归档"]
+    IS["内部同步\nERP/MES/WMS/文件"] --> IN["校验、标准化、单位换算"]
+    EC["外部采集\nRSS/API/Web/Browser"] --> EV["证据、页面差异、信号抽取"]
+    IN --> MAP["物料/供应商映射"]
+    EV --> MAP
+    MAP --> DAY["每日 DRAFT 输入快照"]
+    DAY --> CALC["确定性建议计算"]
+    CALC --> FINAL["固化 READY 每日情报快照"]
+    FINAL --> EXPLAIN["AI 解释与日报草稿"]
+    EXPLAIN --> REVIEW["自动校验与人工审核"]
 
-    B --> G
-    G -->|DAILY/CUSTOM| C --> P
-    G -->|WEEKLY/MONTHLY| DS --> R
-    P --> D --> CL --> R --> A --> S --> V
-    V -->|通过| CO
-    V -->|未通过且可返工| R
-    CO --> H
-    H -->|批准| E --> DI
-    H -->|退回章节| S
+    PERIOD["报告周期输入"] -->|DAILY| DAY
+    PERIOD -->|WEEKLY/MONTHLY| AGG["聚合已固化日报快照"]
+    AGG --> ANALYZE["趋势、异常和变化分析"]
+    REVIEW --> COMPOSE["报告中间表示"]
+    ANALYZE --> COMPOSE
+    COMPOSE --> HUMAN["人工编辑与审核"]
+    HUMAN --> EXPORT["DOCX / PDF / Markdown"]
+    EXPORT --> DISPATCH["下载归档 / 消息交付"]
 ```
 
-自动审核最多返工三次；超过上限后进入 `WAITING_HUMAN`，不得继续自动循环。
+同步、采集、每日计算和周期报告分别创建任务与运行记录。自动审核最多返工三次；超过上限后进入 `WAITING_HUMAN`，不得继续自动循环。
 
 ## 3. 引擎契约
 
@@ -76,16 +75,18 @@ class WorkflowNode:
 ```python
 ReportState = {
     "taskId": str,
-    "briefId": str,
+    "briefId": str | None,
     "templateVersionId": str,
     "reportPeriod": "DAILY | WEEKLY | MONTHLY | CUSTOM",
     "inputMode": "COLLECT_AND_ANALYZE | AGGREGATE_DAILY_SNAPSHOTS",
     "collectionWindow": DateWindow,
     "analysisWindow": DateWindow,
-    "dailySnapshotRefs": list[str],
+    "internalSnapshotRefs": list[str],
+    "externalSignalRefs": list[str],
+    "dailyIntelligenceSnapshotRefs": list[str],
+    "recommendationRefs": list[str],
     "missingDailyDates": list[str],
     "documentIds": list[str],
-    "clusterRefs": list[str],
     "evidenceRefs": list[str],
     "analysisRef": str | None,
     "draftRef": str | None,
@@ -101,20 +102,28 @@ ReportState = {
 
 ## 5. 节点定义
 
-### Brief
+### Task Input
 
-- 验证需求是否完整。
+- 验证工作空间、物料范围、报告规则和日期是否完整。
 - 将 DAY/WEEK/MONTH/CUSTOM 解析为固定时间窗口。
 - 固化模板版本、工作流版本和模型配置。
 - 生成任务预算和幂等键。
+- 自定义专题分析可以额外读取 `ResearchBrief`，物料情报主流程不要求 Brief。
 
 ### Period Input
 
 - 根据 `reportPeriod` 决定输入模式。
-- `DAILY` 和需要新资料的 `CUSTOM` 任务进入 `COLLECT_AND_ANALYZE`。
+- `DAILY` 和需要刷新数据的 `CUSTOM` 任务可以使用 `COLLECT_AND_ANALYZE`，但内部同步和外部采集仍是可单独观察和重试的子任务。
 - `WEEKLY` 和 `MONTHLY` 默认进入 `AGGREGATE_DAILY_SNAPSHOTS`，只读取周期内日报快照。
 - 周报/月报缺少日报快照时记录 `missingDailyDates`，任务进入 `WAITING_HUMAN`，不得自动启动浏览器。
-- 只有用户明确创建补生成日报任务或重新采集任务时，后续任务才可以进入 `Collect`。
+- 只有用户明确创建补生成日报、内部重同步或外部重新采集任务时，系统才运行相应流程。
+
+### Sync Internal Data
+
+- 通过 `EnterpriseDataConnector` 读取物料、供应商、库存、消耗、需求和在途订单。
+- 固定连接器、字段映射和单位换算版本，校验业务时间与必填字段。
+- 输出内部快照引用、错误行清单、同步游标和内容摘要。
+- 只读连接器不得复用任何写回接口；失败重试不能重复生成同一业务快照。
 
 ### Collect
 
@@ -125,11 +134,38 @@ ReportState = {
 
 `Collect` 不属于周报/月报默认路径。周报/月报点击动作不得直接触发 `BrowserCollector` 或打开受控浏览器。
 
+### Normalize、Resolve Entities 与 Extract Signals
+
+- 对内部数据执行字段标准化、单位换算和业务时间规范化。
+- 对外部页面保存原始证据，比较前后版本并抽取价格、规格、可用性、交期和供应商事件。
+- 使用编码、名称、规格、供应商物料编码和别名生成物料/供应商候选映射。
+- 低置信度或冲突映射进入 `WAITING_HUMAN`，不得直接影响正式建议。
+
+### Build Daily Intelligence Snapshot
+
+- 先创建 `DRAFT` 版本，固化当日采用的内部快照集合、正式外部信号集合、参数版本和输入摘要。
+- 记录缺失、过期和异常数据；超过数据新鲜度阈值时阻止正式建议并给出原因。
+- 建议计算成功后写入建议集合引用与最终内容摘要，状态转为 `READY`；审核后转为 `APPROVED`。
+- 快照进入 `READY` 后不可原地修改，补数或修正通过新快照版本生效。
+
+### Calculate Recommendations
+
+- 使用 `PlanningEngine` 计算库存可支撑天数、预计缺料日期、建议下单日期、最晚下单日期和建议数量。
+- 应用安全库存、需求范围、在途数量、交期、最小订购量、订购倍数和单位换算规则。
+- 输出输入摘要、完整计算中间量、原因码、算法标识和版本。
+- 此节点必须是确定性实现，不能调用 LLM 生成数量、日期或最终风险等级。
+
+### Explain Recommendations
+
+- 将确定性计算结果、内部快照和外部信号组织成业务可读解释。
+- 明确区分事实、规则计算、外部变化和待核实推断。
+- AI 输出不得覆盖计算字段，只能生成解释、摘要和候选行动描述。
+
 ### Daily Snapshots
 
-- 查询周期内状态为 `APPROVED` 或 `PUBLISHED` 的日报版本。
-- 读取每个日报的 `contentJson`、Markdown/HTML 快照、引用摘要和内容摘要。
-- 生成 `ReportInputSnapshot` 记录，固化本次周报/月报使用的日报版本。
+- 查询周期内状态为 `APPROVED` 的 `DailyIntelligenceSnapshot` 以及对应已审核或已发布日报版本。
+- 读取每个日报的结构化内部指标、外部信号、建议与决策；Markdown/HTML 仅用于展示和审计。
+- 生成 `ReportInputSnapshot`，固化 `dailySnapshotId`、`structuredDataRef`、日报版本和内容摘要。
 - 不重新抓取日报中的外部来源，不执行浏览器脚本。
 
 ### Preprocess
@@ -161,10 +197,10 @@ ReportState = {
 
 ### Analyze
 
-- 提取事实、数字、单位、时间和主体。
-- 比较不同来源，识别一致、冲突和缺失。
-- 分析趋势、变化率和异常，但禁止执行模型生成的任意代码或 SQL。
-- 为图表生成结构化数据建议和来源映射。
+- 基于结构化日报快照计算库存、消耗、在途、建议采纳率和外部信号的期间变化。
+- 比较不同日期与来源，识别趋势、异常、冲突和缺失。
+- 数值聚合由确定性代码完成，AI 只解释结果；禁止执行模型生成的任意代码或 SQL。
+- 为图表生成结构化数据集快照、单位、口径和来源映射。
 
 ### Summarize
 
@@ -206,6 +242,7 @@ ReportState = {
 - 最大自动返工次数。
 - 单节点和全任务超时。
 - 单来源抓取页面数和请求速率。
+- 内部数据最大陈旧时间和外部信号最低置信度。
 - Agent 工具白名单；模型不能自行扩大权限。
 
 ## 8. 适配器选择标准

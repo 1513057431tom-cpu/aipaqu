@@ -4,98 +4,138 @@
 
 ```mermaid
 flowchart TB
-    UI["Nuxt 3 前端\nDashboard / 采集工作台 / 情报中心 / 报告编辑 / 实时监控 / 系统配置"]
-    API["FastAPI API 层\n认证鉴权 / 参数校验 / 限流 / 路由 / WebSocket / 文件下载"]
-    QUEUE["Celery + Redis\n任务队列 / 调度 / 锁 / 状态 / 事件"]
-    GRAPH["工作流执行层\n采集 / 预处理 / 去重 / 聚类 / 检索 / 分析 / 撰写 / 审核 / 交付"]
-    MYSQL[("MySQL\n业务与审计数据")]
-    ES[("Elasticsearch 8.x\n全文、分块和混合检索")]
-    FILES[("文件存储\n上传文件、原文、导出物")]
-    REDIS[("Redis\n缓存、队列、进度和幂等")]
+    UI["Nuxt 3 前端\n物料 / 供应商 / 数据连接 / 外部监控 / 情报 / 建议 / 报告"]
+    API["FastAPI API 层\n认证鉴权 / 校验 / 幂等 / WebSocket / 文件"]
+    QUEUE["Celery + Redis\n调度 / 队列 / 锁 / 重试 / 事件"]
+    CONNECT["数据接入层\nExcel/CSV / ERP / MES / WMS / 数据库"]
+    COLLECT["外部采集层\nHTTP / RSS / API / Browser / SiteAdapter"]
+    DOMAIN["领域处理层\n标准化 / 实体映射 / 快照 / 变化检测"]
+    PLAN["建议计算层\n库存覆盖 / 缺料 / 积压 / 补货规则"]
+    AI["AI 能力层\n内容抽取 / 辅助匹配 / 解释 / 报告撰写"]
+    WORKFLOW["平台工作流层\n版本 / 节点 / 检查点 / 人工审核"]
+    MYSQL[("MySQL\n主数据、快照、任务、建议和审计")]
+    ES[("Elasticsearch\n文档、分块和检索索引")]
+    FILES[("文件存储\n导入文件、网页证据和导出物")]
 
-    UI <-->|"REST / WebSocket / 文件下载"| API
+    UI <-->|"REST / WebSocket / 下载"| API
     API --> QUEUE
-    QUEUE --> GRAPH
-    API <--> MYSQL
-    GRAPH <--> MYSQL
-    GRAPH <--> ES
-    GRAPH <--> FILES
-    QUEUE <--> REDIS
+    QUEUE --> WORKFLOW
+    WORKFLOW --> CONNECT
+    WORKFLOW --> COLLECT
+    CONNECT --> DOMAIN
+    COLLECT --> DOMAIN
+    DOMAIN --> PLAN
+    DOMAIN --> AI
+    PLAN --> AI
+    WORKFLOW <--> MYSQL
+    DOMAIN <--> MYSQL
+    PLAN <--> MYSQL
+    AI <--> ES
+    COLLECT <--> FILES
+    CONNECT <--> FILES
 ```
 
 ## 2. 分层职责
 
 ### 前端展示层
 
-- 只负责交互、展示、客户端校验和状态订阅。
-- 服务端数据通过统一 API 客户端访问。
-- 任务进度通过 WebSocket 接收，断线后通过 REST 查询最终状态。
-- 富文本和模型输出必须经过安全渲染，不直接执行 HTML 或脚本。
+- 展示物料、供应商、内外部数据状态、变化信号、建议、报告和任务进度。
+- 服务端数据通过统一 API 客户端访问，客户端不自行推导正式采购数量。
+- WebSocket 只传递进度事件；断线后通过游标重连或 REST 查询最终状态。
+- 模型输出、网页快照和富文本经过安全渲染，不直接执行 HTML 或脚本。
 
 ### API 层
 
 - 负责认证、授权、输入验证、分页、幂等和错误规范。
-- 创建长任务后立即返回任务标识，不在 HTTP 请求内执行完整工作流。
-- 文件上传先校验大小、类型和内容，再写入存储并创建解析任务。
-- 不在 HTTP 请求内保存临时流程状态；工作流状态由平台任务、运行记录和节点记录共同维护。
+- 创建同步、采集、计算或报告任务后立即返回任务标识，不在 HTTP 请求内运行长流程。
+- 文件上传先校验大小、类型和内容，再写入隔离存储并创建导入任务。
+- 所有查询按 `workspaceId` 隔离；前端不能提交或覆盖服务端推导的工作空间标识。
 
-### 任务与工作流层
+### 内部数据接入层
 
-- Celery 负责任务分发、定时调度、并发和重试。
-- 平台工作流引擎负责 Agent 节点编排、条件分支、返工和检查点恢复；LangGraph、Temporal、Prefect 或自研执行器只能作为适配器接入。
-- 每个节点均有明确输入输出 Schema，禁止通过无结构文本隐式传递关键状态。
-- 外部调用必须设置超时、重试上限、速率限制和成本预算。
+- 首版支持 Excel/CSV 导入，后续通过 `EnterpriseDataConnector` 接入 ERP、MES、WMS 和数据库。
+- 连接器只负责读取、游标推进和字段映射，不在连接器内计算业务建议。
+- 每次同步固化原始引用、字段映射版本、业务时间、内容摘要和校验结果。
+- 首版连接器默认只读；任何写回能力都必须单独审批、授权和审计。
+
+### 外部采集层
+
+- `Collector` 负责 HTTP、RSS、API 或浏览器获取，`SiteAdapter` 描述站点特有导航和抽取策略。
+- `CrawlPolicy` 限制允许域名、页面数、深度、并发、延迟、脚本执行、附件和超时。
+- 每次成功采集保存原始证据、页面元数据和内容摘要，再执行页面差异与信号抽取。
+- 浏览器能力用于授权登录、动态渲染和人工调试，不用于绕过验证码、付费墙或访问控制。
+
+### 领域处理与建议计算层
+
+- 标准化内部数据单位、业务时间和字段语义，把外部信号映射到 `Material` 或 `Supplier`。
+- 低置信度、冲突或一对多实体映射进入人工确认，不直接影响正式建议。
+- 每日情报快照固定内部快照集合、外部信号集合、建议集合和内容摘要。
+- `PlanningEngine` 使用版本化确定性规则或统计模型计算库存覆盖、缺料、积压、补货日期和数量。
+- 相同输入快照、参数和算法版本必须产生相同结果；AI 不能替代确定性计算。
+
+### AI 与工作流层
+
+- AI 用于网页内容抽取、实体候选匹配、异常解释、摘要和报告撰写。
+- 工作流节点以结构化 Schema 交换状态，不通过自然语言隐藏关键数值或业务状态。
+- 平台工作流引擎负责节点编排、条件分支、预算、检查点和人工等待；LangGraph、Temporal、Prefect 或自研执行器仅作为适配器。
+- Celery 负责定时调度、任务分发、并发和重试，不能成为业务状态的唯一事实来源。
 
 ### 数据与存储层
 
-- MySQL：用户、工作空间、需求、配置、任务、报告、版本、引用、图表和审计。
-- Elasticsearch：文档正文、分块、关键词、向量、聚类和检索字段。
+- MySQL：用户、连接配置、物料、供应商、快照、信号、建议、任务、报告和审计。
+- Elasticsearch：网页和文档正文、分块、关键词、向量与检索字段，不保存唯一业务事实。
 - Redis：Celery Broker/Backend、分布式锁、短期进度、缓存和幂等键。
-- 文件存储：原始上传、网页快照、附件、报告导出和图表图片。
+- 文件存储：导入原文件、网页证据、截图、附件、报告导出和图表图片。
 
 ## 3. 可扩展接口
 
 ```text
-Collector            采集 RSS、API、网页或浏览器页面
-BrowserRuntimeProvider 启动或连接本地 Playwright、远程 CDP 或外部浏览器 Profile
-SiteAdapter          描述站点入口、登录态、分页、选择器、等待和抽取策略
-CrawlPolicy          限制页面数、深度、并发、超时、脚本执行和附件下载
-ContentParser        解析网页、PDF、DOCX、表格等内容
-EmbeddingProvider    生成向量
-LLMProvider          生成、分析和审核
-WorkflowEngine       启动、恢复、取消和查询工作流运行
-WorkflowNode         定义平台节点输入输出、预算和审计契约
-StorageProvider      本地磁盘、MinIO 或 S3
-DeliveryChannel      SMTP、企微、钉钉或飞书
-Exporter             DOCX、PDF、Markdown
+EnterpriseDataConnector  读取 ERP、MES、WMS、数据库或文件数据
+FieldMappingProvider      将来源字段映射为平台标准 Schema
+Collector                 获取 RSS、API、静态网页或浏览器页面
+BrowserRuntimeProvider    启动或连接 Playwright、远程 CDP 或浏览器 Profile
+SiteAdapter               描述站点入口、登录态、分页、选择器和抽取策略
+CrawlPolicy               限制域名、页数、深度、并发、超时和附件
+ContentParser             解析网页、PDF、DOCX 和表格
+MaterialEntityResolver    生成并确认物料、供应商匹配候选
+SignalExtractor           抽取价格、规格、可用性、交期和供应商事件
+PlanningEngine            计算库存覆盖、风险、采购日期和数量
+RecommendationPolicy      定义建议阈值、原因码和人工审核规则
+LLMProvider               内容抽取、解释、摘要和报告撰写
+WorkflowEngine            启动、恢复、取消和查询工作流运行
+WorkflowNode              定义平台节点输入输出、预算和审计契约
+StorageProvider           本地磁盘、MinIO 或 S3
+Exporter                  DOCX、PDF 或 Markdown
+DeliveryChannel           SMTP、企微、钉钉或飞书
 ```
 
-每个接口由注册表按类型加载。配置中保存实现标识和参数，不保存 Python 类路径，避免内部代码结构泄漏成公共契约。
-
-浏览器采集能力参考 `crawl4ai` 和浏览器 Profile 管理类工具的工程模式，统一抽象为 `BrowserCollector + BrowserRuntimeProvider + SiteAdapter + CrawlPolicy`。它用于授权登录采集、动态页面渲染、页面抽取和调试，不作为验证码、付费墙或访问控制绕过工具。
+接口由注册表按实现标识加载。公共配置不保存 Python 类路径，避免内部代码结构泄漏成 API 或数据库契约。
 
 ## 4. 关键数据流
 
 ```mermaid
 flowchart LR
-    BRIEF["采集需求"] --> COLLECT["外部采集"]
-    UPLOAD["用户文档/数据"] --> PARSE["解析标准化"]
-    COLLECT --> PREP["清洗、时间过滤、去重"]
-    PARSE --> PREP
-    PREP --> INDEX["索引与聚类"]
-    INDEX --> ANALYZE["联合检索与分析"]
-    TEMPLATE["报告规则版本"] --> ANALYZE
-    ANALYZE --> DRAFT["报告草稿、引用、数据集、图表"]
-    DRAFT --> HUMAN["人工审核"]
-    HUMAN --> EXPORT["导出"]
-    EXPORT --> SMTP["SMTP 发送"]
+    ERP["内部数据\nERP/MES/WMS/文件"] --> SYNC["同步与校验"]
+    WEB["外部来源\n网站/RSS/API"] --> FETCH["定时采集与证据"]
+    SYNC --> NORMALIZE["标准化"]
+    FETCH --> SIGNAL["差异与信号抽取"]
+    NORMALIZE --> RESOLVE["物料/供应商映射"]
+    SIGNAL --> RESOLVE
+    RESOLVE --> SNAPSHOT["每日结构化情报快照"]
+    SNAPSHOT --> RULES["确定性建议计算"]
+    RULES --> EXPLAIN["AI 解释与报告草稿"]
+    EXPLAIN --> HUMAN["人工审核/调整/拒绝"]
+    HUMAN --> EXPORT["导出与审计"]
 ```
+
+内部同步和外部采集是独立的定时生产流程。日报读取当日已固化数据；周报和月报只读取覆盖日期内的日报结构化快照，不能在报告请求中临时启动浏览器或内部同步。
 
 ## 5. 可靠性设计
 
-- 任务状态持久化，不以 WebSocket 连接是否存在作为成功依据。
-- 每个任务和交付操作使用幂等键。
-- 节点输出先持久化再推进下一节点。
-- 登录凭据失效时暂停对应数据源，不进行无限重试。
-- Elasticsearch 不作为唯一事实存储；业务状态和原始文件引用保存在 MySQL。
-- Redis 数据丢失后可依据 MySQL 任务记录恢复或重新排队。
+- 每个同步批次、采集页面、每日快照、建议计算和报告任务都使用幂等键。
+- 节点输出先持久化再推进下一节点，任务状态不依赖 WebSocket 连接。
+- 连接器游标和页面采集游标分别管理，失败后从最后成功检查点恢复。
+- 登录凭据失效或出现访问挑战时暂停对应来源，不无限重试。
+- 建议永久绑定输入快照、参数和算法版本，历史结果不随规则更新而变化。
+- MySQL 保存重建 Elasticsearch 索引所需的文档元数据和文件引用。
+- Redis 数据丢失后可依据 MySQL 的任务、运行和检查点记录重新排队。

@@ -78,6 +78,7 @@ Collector
 
 统一输出：
 
+- `documentId`
 - `rawHtmlRef`
 - `screenshotRef`
 - `mainText`
@@ -86,8 +87,14 @@ Collector
 - `links`
 - `attachments`
 - `sourceDigest`
+- `fetchedAt`
+- `previousDocumentId`
+- `changeSet`
+- `signalCandidates`
 
-输出进入既有 `Preprocess → Deduplicate → Index → Analyze` 流程。
+`changeSet` 保存前后文本或结构化字段差异；`signalCandidates` 仅包含 `PRICE`、`SPECIFICATION`、`AVAILABILITY`、`LEAD_TIME` 和 `SUPPLIER_EVENT` 候选，并附数值、单位、币种、置信度和证据位置。
+
+输出先进入 `Evidence → Diff → Signal Extraction → Material/Supplier Resolution` 流程。只有证据完整且实体映射已确认的信号才能进入每日情报快照；全文可并行进入 `Preprocess → Deduplicate → Index`，供报告和自定义分析检索。
 
 ## 3. CrawlPolicy
 

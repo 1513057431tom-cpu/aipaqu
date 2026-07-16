@@ -5,25 +5,33 @@
 ```mermaid
 erDiagram
     WORKSPACE ||--o{ USER : contains
-    WORKSPACE ||--o{ RESEARCH_BRIEF : owns
-    RESEARCH_BRIEF ||--o{ BRIEF_SOURCE : specifies
-    RESEARCH_BRIEF ||--o{ BRIEF_MATERIAL : includes
-    RESEARCH_BRIEF ||--o{ MANUAL_DATASET : includes
-    RESEARCH_BRIEF ||--o{ REPORT_TASK : launches
-    SOURCE ||--o{ SOURCE_CREDENTIAL : uses
+    WORKSPACE ||--o{ ENTERPRISE_CONNECTION : configures
+    ENTERPRISE_CONNECTION ||--o{ DATA_SYNC_JOB : runs
+    WORKSPACE ||--o{ MATERIAL : owns
+    WORKSPACE ||--o{ SUPPLIER : owns
+    MATERIAL ||--o{ MATERIAL_ALIAS : has
+    SUPPLIER ||--o{ SUPPLIER_MATERIAL : offers
+    MATERIAL ||--o{ SUPPLIER_MATERIAL : sourced_by
+    MATERIAL ||--o{ INVENTORY_SNAPSHOT : stocked_as
+    MATERIAL ||--o{ CONSUMPTION_SNAPSHOT : consumed_as
+    MATERIAL ||--o{ MATERIAL_DEMAND : demanded_as
+    MATERIAL ||--o{ OPEN_SUPPLY_SNAPSHOT : supplied_as
+    SUPPLIER ||--o{ OPEN_SUPPLY_SNAPSHOT : fulfills
+    WORKSPACE ||--o{ SOURCE : monitors
     SOURCE ||--o{ COLLECTION_JOB : runs
     COLLECTION_JOB ||--o{ DOCUMENT : produces
-    BRIEF_MATERIAL ||--o| DOCUMENT : becomes
-    DOCUMENT ||--o{ DOCUMENT_CHUNK : contains
-    RULE_TEMPLATE ||--o{ RULE_TEMPLATE_VERSION : versions
-    RULE_TEMPLATE_VERSION ||--o{ REPORT_TASK : governs
+    DOCUMENT ||--o{ EXTERNAL_SIGNAL : evidences
+    MATERIAL ||--o{ EXTERNAL_SIGNAL : affected_by
+    SUPPLIER ||--o{ EXTERNAL_SIGNAL : affected_by
+    WORKSPACE ||--o{ DAILY_INTELLIGENCE_SNAPSHOT : records
+    DAILY_INTELLIGENCE_SNAPSHOT ||--o{ PROCUREMENT_RECOMMENDATION : produces
+    MATERIAL ||--o{ PROCUREMENT_RECOMMENDATION : recommends_for
+    PROCUREMENT_RECOMMENDATION ||--o{ RECOMMENDATION_DECISION : reviewed_by
+    DAILY_INTELLIGENCE_SNAPSHOT ||--o{ REPORT_INPUT_SNAPSHOT : feeds
     REPORT_TASK ||--o| REPORT : produces
     REPORT ||--o{ REPORT_VERSION : versions
+    REPORT_VERSION ||--o{ REPORT_INPUT_SNAPSHOT : records
     REPORT_VERSION ||--o{ CITATION : cites
-    REPORT_VERSION ||--o{ CHART : contains
-    MANUAL_DATASET ||--o{ CHART : feeds
-    DELIVERY_CONFIG ||--o{ DELIVERY_RECORD : sends
-    REPORT_VERSION ||--o{ DELIVERY_RECORD : delivered
 ```
 
 ## 2. 核心实体
@@ -35,166 +43,167 @@ erDiagram
 | `Workspace` | id, name, timezone, status |
 | `User` | id, workspaceId, email, passwordHash, role, status, lastLoginAt |
 
-### 采集需求工作台
+### 企业数据连接与同步
 
 | 实体 | 关键字段 |
 | --- | --- |
-| `ResearchBrief` | title, objective, requiredQuestions, dateRangeKind, collectionStart/End, analysisStart/End, timezone, status |
-| `BriefSource` | briefId, sourceType, url, domain, keywords, excludeTerms, priority, instructions |
-| `BriefMaterial` | briefId, materialType, storageKey/text/url, sourceName, occurredAt, purpose, credibility |
-| `ManualDataset` | briefId, name, schemaJson, rowsStorageKey, unitRules, sourceNote, occurredAt |
-| `AnalysisConstraint` | briefId, metricRules, exclusions, assumptions, outputRequirements |
+| `EnterpriseConnection` | workspaceId, name, systemType, adapterKey, configRef, syncMode, schedule, status, lastSucceededAt |
+| `FieldMappingVersion` | connectionId, entityType, version, mappingJson, unitRulesJson, status, publishedAt |
+| `DataSyncJob` | connectionId, mappingVersionId, windowStart/End, cursorBefore/After, idempotencyKey, status, rowCountsJson, errorCode |
+| `ImportFile` | syncJobId, originalName, mediaType, sizeBytes, storageKey, contentDigest, scanStatus, validationReportRef |
 
-### 采集与知识库
+`systemType` 取值为 `ERP`、`MES`、`WMS`、`DATABASE`、`FILE` 或 `OTHER`。首版 `syncMode` 仅允许 `READ_ONLY`；后续写回必须使用独立接口与授权，不复用读取凭据。
+
+### 物料与供应商主数据
 
 | 实体 | 关键字段 |
 | --- | --- |
-| `Source` | type, name, baseUrl, allowedDomains, schedule, parserConfig, retentionDays, status |
+| `Material` | workspaceId, externalCode, name, specification, category, baseUnit, safetyStockQty, leadTimeDays, status |
+| `MaterialAlias` | materialId, aliasType, aliasValue, normalizedValue, sourceRef, status |
+| `Supplier` | workspaceId, externalCode, name, website, country, status |
+| `SupplierMaterial` | supplierId, materialId, supplierMaterialCode, purchaseUnit, conversionToBase, currency, minOrderQty, orderMultiple, leadTimeDays, status |
+| `EntityMappingCandidate` | workspaceId, entityType, sourceRef, candidateEntityId, confidence, reasonJson, status, reviewedBy/At |
+
+`EntityMappingCandidate.status` 取值为 `PENDING`、`CONFIRMED`、`REJECTED` 或 `SUPERSEDED`。只有 `CONFIRMED` 的映射可以进入正式每日快照和建议计算。
+
+### 内部经营数据快照
+
+| 实体 | 关键字段 |
+| --- | --- |
+| `InventorySnapshot` | workspaceId, materialId, locationCode, snapshotAt, onHandQty, availableQty, reservedQty, qualityHoldQty, unit, syncJobId, sourceRecordRef |
+| `ConsumptionSnapshot` | workspaceId, materialId, bucketDate, actualQty, plannedQty, unit, syncJobId, sourceRecordRef |
+| `MaterialDemand` | workspaceId, materialId, requiredAt, requiredQty, unit, sourceType, syncJobId, sourceRecordRef |
+| `OpenSupplySnapshot` | workspaceId, materialId, supplierId, orderNo, orderLineNo, orderedQty, receivedQty, openQty, unit, expectedAt, status, syncJobId, sourceRecordRef |
+| `PlanningParameterVersion` | workspaceId, materialId, version, serviceLevel, safetyStockRule, demandHorizonDays, leadTimeDays, roundingRule, status, publishedAt |
+
+所有数量同时保存原始单位和换算后的基础单位值。无法完成单位换算的记录进入导入错误队列，不参与正式计算。
+
+### 外部采集与变化信号
+
+| 实体 | 关键字段 |
+| --- | --- |
+| `Source` | workspaceId, type, name, baseUrl, allowedDomains, schedule, parserConfig, retentionDays, status |
 | `SourceCredential` | sourceId, credentialType, encryptedPayload, expiresAt, status |
 | `BrowserProfile` | sourceId, providerType, externalProfileId, encryptedConfig, proxyRef, status |
 | `SiteAdapter` | sourceId, version, entryUrls, selectorsJson, actionsJson, crawlPolicyId, status |
-| `CrawlPolicy` | name, maxPages, maxDepth, concurrency, requestDelayMs, timeoutSeconds, allowScripts, allowAttachments |
-| `AccessGrant` | sourceId, grantType, grantedTo, purpose, licenseNote, validFrom/To, confirmedBy/At, status |
+| `CrawlPolicy` | workspaceId, name, maxPages, maxDepth, concurrency, requestDelayMs, timeoutSeconds, allowScripts, allowAttachments |
+| `AccessGrant` | sourceId, grantType, purpose, licenseNote, validFrom/To, confirmedBy/At, status |
 | `AccessChallenge` | sourceId, jobId, challengeType, url, statusCode, screenshotRef, domDigest, status |
 | `ManualVerificationSession` | challengeId, browserProfileId, openedBy, expiresAt, result, auditRef |
-| `CollectionJob` | sourceId/briefId, windowStart/End, cursor, status, attempt, metrics, errorCode |
-| `Document` | originType, sourceId/materialId, canonicalUrl, title, author, publishedAt, fetchedAt, contentHash, rawStorageKey, status |
-| `DocumentChunk` | documentId, sequence, text, tokenCount, embeddingRef, metadata |
+| `CollectionJob` | sourceId, windowStart/End, cursorBefore/After, idempotencyKey, status, attempt, metricsJson, errorCode |
+| `Document` | workspaceId, originType, sourceId, canonicalUrl, title, publishedAt, fetchedAt, contentDigest, rawStorageKey, status |
+| `DocumentChunk` | documentId, sequence, text, tokenCount, embeddingRef, metadataJson |
+| `ExternalSignal` | workspaceId, documentId, sourceId, signalType, materialId, supplierId, bindingKey, occurredAt, observedAt, previousValueJson, currentValueJson, unit, currency, confidence, evidenceRef, reviewStatus, contentDigest |
 
-`originType` 必须区分：
+`signalType` 取值为 `PRICE`、`SPECIFICATION`、`AVAILABILITY`、`LEAD_TIME` 或 `SUPPLIER_EVENT`。`ExternalSignal` 必须至少绑定 `materialId` 或 `supplierId` 之一；`bindingKey` 使用非空稳定值（例如 `MATERIAL:{id}` 或 `SUPPLIER:{id}`）支持去重。正式信号必须有 `documentId`、证据引用和内容摘要。
 
-- `WEB`
-- `RSS`
-- `API`
-- `USER_DOCUMENT`
-- `USER_TEXT`
-- `USER_DATASET`
+`originType` 取值为 `WEB`、`RSS`、`API`、`USER_DOCUMENT`、`USER_TEXT` 或 `USER_DATASET`。
 
-### 模板、报告和图表
+### 每日情报与采购建议
 
 | 实体 | 关键字段 |
 | --- | --- |
-| `RuleTemplate` | name, reportType, status, activeVersionId |
-| `RuleTemplateVersion` | version, sourceFiles, structureJson, styleJson, citationRules, chartRules, publishedAt |
-| `ReportTask` | briefId, templateVersionId, reportPeriod, inputMode, scheduleType, idempotencyKey, status, currentNode, budget |
+| `DailyIntelligenceSnapshot` | workspaceId, coveredDate, version, supersedesSnapshotId, timezone, internalSnapshotSetRef, externalSignalSetRef, recommendationSetRef, contentDigest, status, approvedBy/At |
+| `ProcurementRecommendation` | workspaceId, dailySnapshotId, materialId, supplierId, asOfDate, horizonEnd, recommendedOrderDate, latestOrderDate, recommendedQty, unit, riskLevel, reasonCodesJson, calculationJson, explanation, inputDigest, algorithmKey, algorithmVersion, status |
+| `RecommendationDecision` | recommendationId, decision, adjustedOrderDate, adjustedQty, reason, actorId, createdAt |
+
+每日快照先以 `DRAFT` 固定内部快照、外部信号和参数版本，完成建议计算后写入 `recommendationSetRef` 与最终摘要并进入 `READY`。若补数或修正，创建递增版本并通过 `supersedesSnapshotId` 关联旧版本。
+
+`ProcurementRecommendation.status` 为 `PROPOSED`、`APPROVED`、`ADJUSTED`、`REJECTED` 或 `EXPORTED`。状态由人工动作驱动；规则计算任务的成功或失败由 `WorkflowRun` 表达。
+
+`RecommendationDecision.decision` 为 `APPROVE`、`ADJUST` 或 `REJECT`。调整不会覆盖原始建议，而是追加决策记录。
+
+### 自定义分析、模板和报告
+
+| 实体 | 关键字段 |
+| --- | --- |
+| `ResearchBrief` | workspaceId, title, objective, requiredQuestions, analysisStart/End, timezone, status |
+| `BriefSource` | briefId, sourceType, url, keywords, excludeTerms, priority, instructions |
+| `BriefAttachment` | briefId, attachmentType, storageKey/text/url, sourceName, occurredAt, purpose, credibility |
+| `ManualDataset` | briefId, name, schemaJson, rowsStorageKey, unitRules, sourceNote, occurredAt |
+| `RuleTemplate` | workspaceId, name, reportType, status, activeVersionId |
+| `RuleTemplateVersion` | templateId, version, sourceFiles, structureJson, styleJson, citationRules, chartRules, publishedAt |
+| `ReportTask` | workspaceId, briefId, templateVersionId, reportPeriod, inputMode, periodStart/End, idempotencyKey, status, currentNode, budget |
 | `Report` | taskId, title, reportPeriod, periodStart/End, status, currentVersionId, approvedBy/At |
 | `ReportVersion` | reportId, version, contentJson, markdown, htmlSnapshotRef, changeSource, createdBy |
-| `ReportInputSnapshot` | taskId, sourceReportId, sourceVersionId, sourcePeriod, coveredDate, htmlSnapshotRef, contentDigest |
-| `Citation` | reportVersionId, sectionId, claimId, documentId/chunkId, quoteDigest, relevanceScore |
-| `Chart` | reportVersionId, datasetId, title, type, datasetSnapshot, optionJson, sourceRefs |
+| `ReportInputSnapshot` | reportVersionId, dailySnapshotId, sourceReportVersionId, coveredDate, structuredDataRef, htmlSnapshotRef, contentDigest |
+| `Citation` | reportVersionId, sectionId, claimId, documentId, chunkId, internalSnapshotRef, quoteDigest, supportType, relevanceScore |
+| `Chart` | reportVersionId, title, type, datasetSnapshot, unit, metricDefinition, optionJson, sourceRefs, renderedImageRef |
 
-### 交付、工作流和审计
+`ResearchBrief` 是补充的专题分析配置，不承载主数据、同步或任务状态。HTML 快照只用于展示和审计；`structuredDataRef` 是周报、月报计算的输入。
+
+### 工作流、交付和审计
 
 | 实体 | 关键字段 |
 | --- | --- |
-| `DeliveryConfig` | type, name, encryptedConfig, sender, status |
-| `DeliveryRecord` | configId, reportVersionId, recipients, subject, attachmentRefs, idempotencyKey, status, attempts |
 | `WorkflowDefinition` | key, version, engineType, definitionJson, limits, status |
 | `AgentDefinition` | key, provider, model, promptVersion, toolPolicy, limits |
-| `WorkflowRun` | taskId, workflowVersion, engineType, engineRunRef, status, stateRef, startedAt, finishedAt |
+| `WorkflowRun` | workspaceId, taskType, taskId, workflowVersion, engineType, engineRunRef, status, stateRef, startedAt, finishedAt |
 | `WorkflowNodeRun` | runId, nodeKey, inputDigest, outputRef, status, tokens, durationMs, errorCode |
-| `AuditLog` | actorId, action, resourceType, resourceId, result, metadata, createdAt |
+| `DeliveryConfig` | workspaceId, type, name, encryptedConfig, sender, status |
+| `DeliveryRecord` | configId, reportVersionId, recipients, subject, attachmentRefs, idempotencyKey, status, attempts |
+| `AuditLog` | workspaceId, actorId, action, resourceType, resourceId, result, metadataJson, createdAt |
 
-## 3. 状态约定
+## 3. 状态边界
 
-### ResearchBrief
-
-`DRAFT → READY → ARCHIVED`
-
-`ResearchBrief` 是需求配置，不承载任务执行状态。运行中的状态由 `ReportTask` 表达；一个 Brief 可以多次启动任务。
-
-### ReportTask
-
-`PENDING → QUEUED → RUNNING → WAITING_HUMAN → SUCCEEDED`
-
-失败状态为 `FAILED_RETRYABLE` 或 `FAILED_FINAL`；取消为 `CANCELLED`。
-
-`WAITING_HUMAN` 表示自动生成已经完成但需要人工处理，例如自动审核超过返工上限、需要补充来源或等待编辑审核。
-
-`reportPeriod` 取值为 `DAILY`、`WEEKLY`、`MONTHLY` 或 `CUSTOM`。`inputMode` 取值：
-
-- `COLLECT_AND_ANALYZE`：日报或自定义任务使用，可进入采集、解析和检索流程。
-- `AGGREGATE_DAILY_SNAPSHOTS`：周报/月报默认使用，只读取日报快照，不触发浏览器采集。
-
-当 `reportPeriod` 为 `WEEKLY` 或 `MONTHLY` 时，默认 `inputMode` 必须为 `AGGREGATE_DAILY_SNAPSHOTS`。如果缺少覆盖日期内的日报快照，任务不得自动进入 `Collect`，应进入 `WAITING_HUMAN` 并记录缺失日期。
-
-### Report
-
-`DRAFT → IN_REVIEW → APPROVED → PUBLISHED → ARCHIVED`
-
-`Report` 状态由人工审核与发布动作驱动，不表示后台任务是否仍在运行。报告发布后不得修改已发布版本，只能创建新版本。
-
-### DeliveryRecord
-
-`PENDING → SENDING → SENT`
-
-失败为 `FAILED_RETRYABLE` 或 `FAILED_FINAL`。
+- `DataSyncJob`、`CollectionJob`、`ReportTask` 和 `WorkflowRun` 表达机器执行状态：`PENDING → QUEUED → RUNNING → SUCCEEDED`，失败为 `FAILED_RETRYABLE` 或 `FAILED_FINAL`，取消为 `CANCELLED`。
+- 需要人工解决映射、访问挑战、缺失日报或报告审核时，任务进入 `WAITING_HUMAN`，不能把人工状态伪装成机器仍在运行。
+- `DailyIntelligenceSnapshot` 为 `DRAFT → READY → APPROVED → ARCHIVED`，固化后只能创建新版本或替代快照，不能原地修改。
+- `Report` 为 `DRAFT → IN_REVIEW → APPROVED → PUBLISHED → ARCHIVED`，由人工审核和发布驱动。
+- `ReportTask.inputMode` 为 `COLLECT_AND_ANALYZE` 或 `AGGREGATE_DAILY_SNAPSHOTS`。周报和月报默认且只能使用后者，除非用户另行创建独立补采任务。
+- `DeliveryRecord` 为 `PENDING → SENDING → SENT`，失败为 `FAILED_RETRYABLE` 或 `FAILED_FINAL`。
 
 ## 4. 数据约束与索引
 
 ### 唯一约束
 
 - `User(workspaceId, email)` 唯一。
-- `ResearchBrief(workspaceId, title, deletedAt)` 在未删除记录中唯一。
-- `RuleTemplateVersion(templateId, version)` 唯一。
-- `ReportVersion(reportId, version)` 唯一。
-- `ReportInputSnapshot(taskId, sourceVersionId)` 唯一，防止同一日报版本被重复纳入周期汇总。
-- `Document(canonicalUrl)` 在 URL 存在时唯一；同一正文通过 `contentHash` 去重。
-- `DeliveryRecord(idempotencyKey)` 唯一，防止重试重复发送。
-- `ReportTask(idempotencyKey)` 唯一，防止重复启动同一任务。
-- `SiteAdapter(sourceId, version)` 唯一，任务运行时固定适配器版本。
-- `BrowserProfile(sourceId, providerType, externalProfileId)` 唯一。
-- `AccessGrant(sourceId, grantType, validFrom, validTo)` 防止同一来源重复配置冲突授权。
-- `ManualVerificationSession(challengeId)` 同一挑战同一时间只允许一个接管会话。
+- `EnterpriseConnection(workspaceId, name)` 在未删除记录中唯一。
+- `FieldMappingVersion(connectionId, entityType, version)` 唯一。
+- `DataSyncJob(idempotencyKey)`、`CollectionJob(idempotencyKey)`、`ReportTask(idempotencyKey)` 唯一。
+- `Material(workspaceId, externalCode)`、`Supplier(workspaceId, externalCode)` 唯一。
+- `MaterialAlias(materialId, normalizedValue)` 唯一。
+- `SupplierMaterial(supplierId, materialId)` 唯一。
+- `InventorySnapshot(materialId, locationCode, snapshotAt, syncJobId)` 唯一。
+- `ConsumptionSnapshot(materialId, bucketDate, syncJobId)` 唯一。
+- `OpenSupplySnapshot(orderNo, orderLineNo, syncJobId)` 唯一。
+- `Source(workspaceId, baseUrl)`、`SiteAdapter(sourceId, version)` 唯一。
+- `Document(sourceId, canonicalUrl, contentDigest)` 唯一。
+- `ExternalSignal(sourceId, signalType, bindingKey, occurredAt, contentDigest)` 唯一。
+- `DailyIntelligenceSnapshot(workspaceId, coveredDate, version)` 唯一，`(workspaceId, coveredDate, contentDigest)` 也唯一以防同内容重复建版本。
+- `ProcurementRecommendation(dailySnapshotId, materialId, algorithmKey, algorithmVersion)` 唯一。
+- `RecommendationDecision(recommendationId, createdAt, actorId)` 唯一。
+- `RuleTemplateVersion(templateId, version)`、`ReportVersion(reportId, version)` 唯一。
+- `ReportInputSnapshot(reportVersionId, dailySnapshotId)` 唯一。
+- `DeliveryRecord(idempotencyKey)` 唯一。
 
 ### 关键索引
 
-- `ReportTask(status, createdAt)` 用于队列和监控。
-- `Report(reportPeriod, periodStart, periodEnd, status)` 用于查找周期内已审核或已发布日报。
+- `DataSyncJob(connectionId, status, createdAt)` 与 `CollectionJob(sourceId, status, createdAt)` 用于调度和恢复。
+- `Material(workspaceId, name, specification)` 与 `MaterialAlias(normalizedValue)` 用于实体匹配。
+- `InventorySnapshot(materialId, snapshotAt)`、`ConsumptionSnapshot(materialId, bucketDate)` 和 `OpenSupplySnapshot(materialId, expectedAt, status)` 用于建议计算。
+- `ExternalSignal(materialId, signalType, occurredAt)`、`ExternalSignal(supplierId, occurredAt)` 用于变化时间线。
+- `DailyIntelligenceSnapshot(workspaceId, coveredDate, status)` 用于周期报告覆盖检查。
+- `ProcurementRecommendation(workspaceId, status, riskLevel, asOfDate)` 用于建议工作台。
 - `WorkflowNodeRun(runId, nodeKey, status)` 用于恢复和节点追踪。
-- `Document(publishedAt, originType, status)` 用于时间窗口过滤。
-- `Citation(reportVersionId, sectionId, claimId)` 用于报告编辑器溯源。
-- `ReportInputSnapshot(taskId, coveredDate)` 用于周报/月报检查日报覆盖情况。
+- `Citation(reportVersionId, sectionId, claimId)` 用于报告证据溯源。
 - `AuditLog(workspaceId, actorId, createdAt)` 用于审计查询。
-- `DeliveryRecord(status, createdAt)` 用于发送重试和监控。
-- `CollectionJob(sourceId, status, createdAt)` 用于采集队列和失败恢复。
-- `SiteAdapter(sourceId, status)` 用于选择当前可用适配器。
-- `AccessChallenge(sourceId, status, createdAt)` 用于挑战处理队列。
-- `AccessGrant(sourceId, status, validTo)` 用于判断付费或授权来源是否可采集。
 
-### 外键与删除
+### 外键、版本与删除
 
-- 所有业务实体必须带 `workspaceId` 或可通过父实体唯一追溯到 `workspaceId`。
-- 删除用户、模板、报告和数据源默认软删除；已被报告引用的实体不得物理删除。
-- `ReportVersion`、`RuleTemplateVersion`、`WorkflowDefinition`、`AgentDefinition` 一旦被任务引用，只能停用，不能修改历史内容。
-- 原始文件可按保留策略清理，但已发布报告引用的文件摘要、来源元数据和导出物必须保留。
-- Elasticsearch 索引记录可重建；MySQL 中必须保存重建所需的文档、分块和文件引用。
+- 所有业务实体必须带 `workspaceId` 或通过父实体唯一追溯到工作空间。
+- 跨实体引用必须验证工作空间一致，禁止仅依赖前端过滤。
+- 主数据、连接、来源和报告默认软删除；已被快照、建议或报告引用的记录不得物理删除。
+- `FieldMappingVersion`、`PlanningParameterVersion`、`SiteAdapter`、`RuleTemplateVersion`、`WorkflowDefinition` 和 `AgentDefinition` 一旦被运行引用，只能停用，不能修改历史内容。
+- `DailyIntelligenceSnapshot`、`ProcurementRecommendation`、`RecommendationDecision`、`ReportVersion` 和审计日志不可原地修改或删除。
+- 原始文件可按保留策略归档，但正式外部信号的证据、摘要和访问元数据必须保留。
+- Elasticsearch 可重建；MySQL 和文件存储必须保留重建所需的元数据与原文引用。
 
-### 引用与图表最小字段
+## 5. 时间、数量与证据规则
 
-`Citation` 至少保存：
-
-- `claimId`
-- `sectionId`
-- `documentId`
-- `chunkId`
-- `quoteDigest`
-- `supportType`：`DIRECT`、`INDIRECT`、`CONFLICTING`
-- `relevanceScore`
-
-`Chart` 至少保存：
-
-- `datasetSnapshot`
-- `unit`
-- `metricDefinition`
-- `sourceRefs`
-- `optionJson`
-- `renderedImageRef`
-- `createdFromClaimIds`
-
-## 5. 时间与删除规则
-
-- 所有数据库时间以 UTC 保存，API 返回 ISO 8601，并附带工作空间时区。
-- 日期范围在创建任务时解析成固定的 UTC 起止时间，避免后续跨时区漂移。
-- 业务实体默认软删除，原始文件根据保留策略异步清理。
-- 已发布报告引用的模板版本、数据集快照和来源摘要不得物理删除。
+- 数据库时间以 UTC 保存，API 返回 ISO 8601；业务日期同时保存工作空间时区。
+- 内部记录区分来源业务时间与同步时间，外部记录区分事件发生时间与观察时间。
+- 所有数量保存原始值、原始单位、基础单位值和换算版本；金额保存币种。
+- 采购建议至少保存 `inputDigest`、`calculationJson`、`algorithmKey`、`algorithmVersion`、参数版本和原因码。
+- `Citation` 可以引用外部 `Document/DocumentChunk`，也可以引用内部结构化快照；关键结论至少有一种可查看依据。
+- 周报和月报的 `ReportInputSnapshot` 必须引用日报 `DailyIntelligenceSnapshot` 和 `structuredDataRef`，不能只保存 HTML。

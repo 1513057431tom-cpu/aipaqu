@@ -62,8 +62,8 @@
 
 | 角色 | 权限 |
 | --- | --- |
-| `ADMIN` | 管理用户、模型、Embedding、SMTP、采集凭据、安全配置；可查看和操作所有工作空间内资源 |
-| `EDITOR` | 创建和运行需求、上传资料、编辑和审核报告、导出报告；不能读取秘密明文或修改系统级配置 |
+| `ADMIN` | 管理用户、连接器、字段映射、模型、采集凭据和安全配置；可查看和操作工作空间内所有资源 |
+| `EDITOR` | 导入数据、维护实体映射、配置监控、审核信号和建议、编辑及导出报告；不能读取秘密明文或修改系统级配置 |
 
 ### 幂等约定
 
@@ -121,7 +121,158 @@ MVP 支持：
 | GET | `/auth/me` | 当前用户 |
 | PATCH | `/auth/password` | 修改密码 |
 
-## 3. 采集需求与数据工作台
+## 3. 物料与供应情报
+
+### 企业连接与同步
+
+| 方法 | 路径 | 用途 | 权限 |
+| --- | --- | --- | --- |
+| GET | `/enterprise-connections` | 查询内部数据连接 | `ADMIN`, `EDITOR` |
+| POST | `/enterprise-connections` | 创建只读连接 | `ADMIN` |
+| PATCH | `/enterprise-connections/{connectionId}` | 修改连接元数据或调度 | `ADMIN` |
+| POST | `/enterprise-connections/{connectionId}/test` | 测试连接，不返回秘密 | `ADMIN` |
+| GET | `/enterprise-connections/{connectionId}/field-mappings` | 查询字段映射版本 | `ADMIN`, `EDITOR` |
+| POST | `/enterprise-connections/{connectionId}/field-mappings` | 创建映射草稿 | `ADMIN`, `EDITOR` |
+| POST | `/enterprise-connections/{connectionId}/sync-jobs` | 启动只读同步 | `ADMIN`, `EDITOR` |
+| GET | `/data-sync-jobs/{jobId}` | 查询同步结果与错误行 | `ADMIN`, `EDITOR` |
+| POST | `/imports` | 上传 Excel/CSV 并创建导入任务 | `ADMIN`, `EDITOR` |
+
+创建连接时只能提交秘密引用，API 不接受或返回可重复读取的明文凭据：
+
+```json
+{
+  "name": "生产 ERP 只读连接",
+  "systemType": "ERP",
+  "adapterKey": "generic-jdbc-v1",
+  "configRef": "secret://workspace/ws_1/erp_readonly",
+  "syncMode": "READ_ONLY",
+  "schedule": "0 */6 * * *"
+}
+```
+
+创建同步和导入任务必须携带 `Idempotency-Key`，成功返回 `202`：
+
+```json
+{
+  "jobId": "sync_01...",
+  "status": "QUEUED",
+  "connectionId": "conn_01...",
+  "fieldMappingVersion": 3,
+  "createdAt": "2026-07-16T08:00:00Z"
+}
+```
+
+### 物料、供应商与实体映射
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/materials` | 查询物料，支持编码、名称、分类、状态过滤 |
+| POST | `/materials` | 创建物料 |
+| GET | `/materials/{materialId}` | 查看物料聚合详情 |
+| PATCH | `/materials/{materialId}` | 修改未版本化的主数据字段 |
+| GET | `/materials/{materialId}/timeline` | 查询库存、消耗、在途、信号和建议时间线 |
+| GET | `/suppliers` | 查询供应商 |
+| POST | `/suppliers` | 创建供应商 |
+| GET | `/suppliers/{supplierId}` | 查看供应商详情 |
+| PATCH | `/suppliers/{supplierId}` | 修改供应商主数据 |
+| GET | `/supplier-materials` | 查询供货关系 |
+| POST | `/supplier-materials` | 创建供货关系 |
+| GET | `/entity-mapping-candidates` | 查询待确认映射 |
+| POST | `/entity-mapping-candidates/{candidateId}/confirm` | 确认映射 |
+| POST | `/entity-mapping-candidates/{candidateId}/reject` | 拒绝映射 |
+
+`MaterialResponse`：
+
+```json
+{
+  "id": "mat_01...",
+  "externalCode": "RM-000128",
+  "name": "基础原料 A",
+  "specification": "工业级 25kg",
+  "category": "原材料",
+  "baseUnit": "kg",
+  "safetyStockQty": 1200,
+  "leadTimeDays": 14,
+  "dataFreshness": {
+    "inventoryAt": "2026-07-16T00:00:00Z",
+    "consumptionThrough": "2026-07-15",
+    "openSupplyAt": "2026-07-16T00:00:00Z"
+  },
+  "status": "ACTIVE"
+}
+```
+
+### 内部快照与外部信号
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/inventory-snapshots` | 查询库存快照 |
+| GET | `/consumption-snapshots` | 查询消耗快照 |
+| GET | `/material-demands` | 查询需求记录 |
+| GET | `/open-supply-snapshots` | 查询在途订单快照 |
+| GET | `/external-signals` | 查询外部变化信号 |
+| GET | `/external-signals/{signalId}` | 查看结构化变化和原始证据 |
+| POST | `/external-signals/{signalId}/confirm` | 确认信号 |
+| POST | `/external-signals/{signalId}/reject` | 拒绝信号 |
+| GET | `/daily-intelligence-snapshots` | 查询每日情报快照 |
+| POST | `/daily-intelligence-snapshots/build` | 创建每日快照与建议计算任务 |
+| GET | `/daily-intelligence-snapshots/{snapshotId}` | 查看快照覆盖与内容摘要 |
+
+外部信号列表支持 `materialId`、`supplierId`、`signalType`、`occurredAfter`、`occurredBefore`、`reviewStatus` 和 `minConfidence` 过滤。证据下载使用短期签名 URL，不直接暴露存储路径。
+
+### 采购建议与人工决策
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/procurement-recommendations` | 查询建议，支持风险、状态、日期和物料过滤 |
+| GET | `/procurement-recommendations/{recommendationId}` | 查看建议、计算过程和证据 |
+| POST | `/procurement-recommendations/{recommendationId}/decisions` | 批准、调整或拒绝建议 |
+| POST | `/procurement-recommendations/export` | 导出已选择建议，不创建采购订单 |
+
+`ProcurementRecommendationResponse`：
+
+```json
+{
+  "id": "rec_01...",
+  "materialId": "mat_01...",
+  "supplierId": "sup_01...",
+  "asOfDate": "2026-07-16",
+  "horizonEnd": "2026-08-15",
+  "recommendedOrderDate": "2026-07-18",
+  "latestOrderDate": "2026-07-21",
+  "recommendedQty": 5000,
+  "unit": "kg",
+  "riskLevel": "HIGH",
+  "reasonCodes": ["PROJECTED_SHORTAGE", "LEAD_TIME_INCREASED"],
+  "calculation": {
+    "availableQty": 2200,
+    "openSupplyQty": 1000,
+    "demandQty": 7100,
+    "safetyStockQty": 1100,
+    "leadTimeDays": 17,
+    "orderMultiple": 500
+  },
+  "inputDigest": "sha256:...",
+  "algorithm": {"key": "reorder-point", "version": "1.0.0"},
+  "evidenceRefs": ["signal_01...", "inventory_01..."],
+  "status": "PROPOSED"
+}
+```
+
+`DecideRecommendationRequest`：
+
+```json
+{
+  "decision": "ADJUST",
+  "adjustedOrderDate": "2026-07-19",
+  "adjustedQty": 4500,
+  "reason": "结合最小运输批量和现场盘点调整"
+}
+```
+
+决策接口要求 `If-Match` 版本或当前建议版本号，过期修改返回 `409 VERSION_CONFLICT`。批准或调整只改变平台内决策状态，不写回 ERP。
+
+## 4. 自定义分析工作台
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
@@ -134,7 +285,7 @@ MVP 支持：
 | POST | `/briefs/{briefId}/validate` | 校验时间、来源和规则完整性 |
 | GET | `/briefs/{briefId}/sources` | 查询指定网站、URL、关键词 |
 | POST | `/briefs/{briefId}/sources` | 添加指定网站、URL、关键词 |
-| POST | `/briefs/{briefId}/materials` | 上传或粘贴补充资料 |
+| POST | `/briefs/{briefId}/attachments` | 上传或粘贴补充资料 |
 | GET | `/briefs/{briefId}/datasets` | 查询用户数据集 |
 | POST | `/briefs/{briefId}/datasets` | 创建用户数据集 |
 | POST | `/briefs/{briefId}/run` | 创建一次报告任务 |
@@ -143,16 +294,16 @@ MVP 支持：
 
 ```json
 {
-  "title": "新能源汽车行业周报",
-  "objective": "分析价格、销量、政策和重点企业动态",
+  "title": "基础原料 A 供应变化专题",
+  "objective": "分析价格、供货状态、交期和供应商动态",
   "dateRange": {
     "kind": "WEEK",
     "referenceDate": "2026-06-25",
     "timezone": "Asia/Shanghai"
   },
   "requiredQuestions": [
-    "本周市场最重要的变化是什么？",
-    "重点企业有哪些可验证的新动作？"
+    "本周价格和交期发生了哪些可验证变化？",
+    "哪些变化可能影响未来三十天的供应？"
   ]
 }
 ```
@@ -165,16 +316,16 @@ MVP 支持：
 
 ```json
 {
-  "title": "新能源汽车行业周报",
-  "objective": "分析价格、销量、政策和重点企业动态",
-  "requiredQuestions": ["本周市场最重要的变化是什么？"],
+  "title": "基础原料 A 供应变化专题",
+  "objective": "分析价格、供货状态、交期和供应商动态",
+  "requiredQuestions": ["本周价格和交期发生了哪些可验证变化？"],
   "dateRange": {
     "kind": "WEEK",
     "referenceDate": "2026-06-25",
     "timezone": "Asia/Shanghai"
   },
   "analysisConstraints": {
-    "metricRules": ["销量使用自然周口径"],
+    "metricRules": ["价格统一换算为基础单位"],
     "exclusions": ["不使用未经证实的社交媒体传言"],
     "outputRequirements": ["每条关键结论必须带引用"]
   }
@@ -187,9 +338,9 @@ MVP 支持：
 {
   "id": "brief_...",
   "workspaceId": "ws_...",
-  "title": "新能源汽车行业周报",
-  "objective": "分析价格、销量、政策和重点企业动态",
-  "requiredQuestions": ["本周市场最重要的变化是什么？"],
+  "title": "基础原料 A 供应变化专题",
+  "objective": "分析价格、供货状态、交期和供应商动态",
+  "requiredQuestions": ["本周价格和交期发生了哪些可验证变化？"],
   "dateRange": {
     "kind": "WEEK",
     "referenceDate": "2026-06-25",
@@ -231,7 +382,7 @@ MVP 支持：
 }
 ```
 
-## 4. 数据源与采集
+## 5. 数据源与采集
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
@@ -323,7 +474,7 @@ MVP 支持：
 }
 ```
 
-## 5. 文档与检索
+## 6. 文档与检索
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
@@ -349,7 +500,7 @@ MVP 支持：
 }
 ```
 
-## 6. 报告模板
+## 7. 报告模板
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
@@ -360,7 +511,7 @@ MVP 支持：
 | POST | `/templates/{templateId}/versions` | 创建模板版本 |
 | POST | `/templates/{templateId}/versions/{version}/publish` | 发布模板版本 |
 
-## 7. 报告任务、报告和图表
+## 8. 报告任务、报告和图表
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
@@ -402,7 +553,7 @@ MVP 支持：
 
 - `reportPeriod=DAILY` 默认 `inputMode=COLLECT_AND_ANALYZE`。
 - `reportPeriod=WEEKLY` 或 `MONTHLY` 默认 `inputMode=AGGREGATE_DAILY_SNAPSHOTS`。
-- 周报/月报创建任务时只读取覆盖日期内已审核或已发布的日报 `ReportVersion` 快照。
+- 周报/月报创建任务时只读取覆盖日期内已批准的 `DailyIntelligenceSnapshot` 和已审核或已发布的日报版本。
 - 当日报快照缺失且 `allowBackfillDailyReports=false` 时返回 `409 PERIOD_INPUT_INCOMPLETE`，响应中包含 `missingDates`。
 - 即使 `allowBackfillDailyReports=true`，也只能创建“补生成日报”任务；不得在周报/月报点击动作中直接打开浏览器。
 
@@ -415,7 +566,8 @@ MVP 支持：
     "message": "Weekly or monthly report requires daily report snapshots.",
     "details": {
       "missingDates": ["2026-06-24", "2026-06-25"],
-      "requiredStatus": ["APPROVED", "PUBLISHED"]
+      "requiredDailySnapshotStatus": ["APPROVED"],
+      "requiredReportStatus": ["APPROVED", "PUBLISHED"]
     }
   }
 }
@@ -427,7 +579,7 @@ MVP 支持：
 {
   "id": "report_...",
   "taskId": "task_...",
-  "title": "新能源汽车行业周报",
+  "title": "物料与供应情报周报",
   "status": "DRAFT",
   "currentVersion": {
     "id": "rpv_...",
@@ -437,21 +589,24 @@ MVP 支持：
         {
           "sectionId": "summary",
           "title": "摘要",
-          "bodyMarkdown": "本周市场...",
+          "bodyMarkdown": "本周共有 3 项高风险缺料建议...",
           "claimIds": ["claim_1"]
         }
       ]
     },
-    "markdown": "# 新能源汽车行业周报\n\n...",
+    "markdown": "# 物料与供应情报周报\n\n...",
     "htmlSnapshotRef": "files/reports/rpv_.../snapshot.html",
     "changeSource": "AI_DRAFT"
   },
   "inputSnapshots": [
     {
+      "dailySnapshotId": "daily_intel_...",
       "sourceReportId": "report_daily_...",
       "sourceVersionId": "rpv_daily_...",
       "sourcePeriod": "DAILY",
       "coveredDate": "2026-06-24",
+      "structuredDataRef": "snapshots/daily/2026-06-24.json",
+      "contentDigest": "sha256:...",
       "htmlSnapshotRef": "files/reports/rpv_daily_.../snapshot.html"
     }
   ],
@@ -468,7 +623,7 @@ MVP 支持：
 }
 ```
 
-## 8. SMTP 交付
+## 9. SMTP 交付
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
@@ -480,7 +635,7 @@ MVP 支持：
 | GET | `/delivery-records` | 查看发送记录 |
 | POST | `/delivery-records/{recordId}/retry` | 幂等重试 |
 
-## 9. 实时事件
+## 10. 实时事件
 
 WebSocket：`/api/v1/events?workspaceId=...&cursor=...`
 
