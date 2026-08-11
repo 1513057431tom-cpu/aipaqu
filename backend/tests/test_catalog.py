@@ -1,0 +1,173 @@
+from fastapi.testclient import TestClient
+
+from app.main import create_app
+
+
+def login(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"email": "admin@example.com", "password": "change-me-now"},
+    )
+    assert response.status_code == 200
+
+
+def test_materials_require_authentication() -> None:
+    client = TestClient(create_app())
+
+    response = client.get("/api/v1/materials")
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "UNAUTHENTICATED"
+
+
+def test_create_and_filter_materials() -> None:
+    client = TestClient(create_app())
+    login(client)
+
+    create_response = client.post(
+        "/api/v1/materials",
+        json={
+            "externalCode": "  TEST-RM-1001  ",
+            "name": "  基础原料 A  ",
+            "specification": "工业级 25kg",
+            "category": "原材料",
+            "baseUnit": "kg",
+            "safetyStockQty": 1200,
+            "leadTimeDays": 14,
+        },
+    )
+
+    assert create_response.status_code == 201
+    created = create_response.json()
+    assert created["externalCode"] == "TEST-RM-1001"
+    assert created["name"] == "基础原料 A"
+    assert created["status"] == "ACTIVE"
+    assert created["workspaceId"] == "default"
+
+    list_response = client.get("/api/v1/materials", params={"q": "TEST-RM-1001"})
+
+    assert list_response.status_code == 200
+    body = list_response.json()
+    assert body["pagination"]["totalItems"] == 1
+    assert body["data"][0]["id"] == created["id"]
+
+
+def test_duplicate_material_code_is_rejected() -> None:
+    client = TestClient(create_app())
+    login(client)
+    payload = {
+        "externalCode": "TEST-RM-DUPLICATE",
+        "name": "测试物料",
+        "baseUnit": "kg",
+    }
+
+    first_response = client.post("/api/v1/materials", json=payload)
+    duplicate_response = client.post("/api/v1/materials", json=payload)
+
+    assert first_response.status_code == 201
+    assert duplicate_response.status_code == 409
+    assert duplicate_response.json()["error"]["code"] == "MATERIAL_CODE_CONFLICT"
+
+
+def test_create_and_list_suppliers() -> None:
+    client = TestClient(create_app())
+    login(client)
+
+    create_response = client.post(
+        "/api/v1/suppliers",
+        json={
+            "externalCode": "TEST-SUP-1001",
+            "name": "华东供应商",
+            "website": "https://supplier.example.com",
+            "country": "CN",
+        },
+    )
+
+    assert create_response.status_code == 201
+    created = create_response.json()
+    assert created["status"] == "ACTIVE"
+
+    list_response = client.get("/api/v1/suppliers", params={"q": "华东"})
+
+    assert list_response.status_code == 200
+    assert list_response.json()["data"][0]["id"] == created["id"]
+
+
+def test_csv_import_creates_materials_and_reports_invalid_rows() -> None:
+    client = TestClient(create_app())
+    login(client)
+    csv_content = (
+        "externalCode,name,specification,category,baseUnit,safetyStockQty,leadTimeDays\n"
+        "TEST-CSV-1001,导入物料 A,25kg,原材料,kg,1000,12\n"
+        "TEST-CSV-1002,缺少单位,25kg,原材料,,500,7\n"
+    )
+
+    response = client.post(
+        "/api/v1/imports",
+        data={"entityType": "MATERIAL"},
+        files={"file": ("materials.csv", csv_content.encode("utf-8"), "text/csv")},
+    )
+
+    assert response.status_code == 202
+    body = response.json()
+    assert body["status"] == "SUCCEEDED_WITH_ERRORS"
+    assert body["totalRows"] == 2
+    assert body["createdRows"] == 1
+    assert body["failedRows"] == 1
+    assert body["errors"][0]["row"] == 3
+
+    list_response = client.get("/api/v1/materials", params={"q": "TEST-CSV-1001"})
+    assert list_response.json()["pagination"]["totalItems"] == 1
+
+
+def test_csv_import_rejects_unsupported_file_type() -> None:
+    client = TestClient(create_app())
+    login(client)
+
+    response = client.post(
+        "/api/v1/imports",
+        data={"entityType": "MATERIAL"},
+        files={"file": ("materials.txt", b"externalCode,name", "text/plain")},
+    )
+
+    assert response.status_code == 415
+    assert response.json()["error"]["code"] == "UNSUPPORTED_IMPORT_TYPE"
+
+
+def test_supplier_csv_import_allows_blank_optional_fields() -> None:
+    client = TestClient(create_app())
+    login(client)
+    csv_content = (
+        "externalCode,name,website,country\n"
+        "TEST-CSV-SUP-1001,导入供应商,,CN\n"
+    )
+
+    response = client.post(
+        "/api/v1/imports",
+        data={"entityType": "SUPPLIER"},
+        files={"file": ("suppliers.csv", csv_content.encode("utf-8"), "text/csv")},
+    )
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "SUCCEEDED"
+    assert response.json()["createdRows"] == 1
+
+
+def test_csv_import_rejects_files_without_data_rows() -> None:
+    client = TestClient(create_app())
+    login(client)
+
+    response = client.post(
+        "/api/v1/imports",
+        data={"entityType": "MATERIAL"},
+        files={
+            "file": (
+                "materials.csv",
+                b"externalCode,name,baseUnit\n",
+                "text/csv",
+            )
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "CSV_HAS_NO_DATA_ROWS"
