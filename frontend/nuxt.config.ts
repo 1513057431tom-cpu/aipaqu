@@ -1,6 +1,7 @@
 export default defineNuxtConfig({
   compatibilityDate: "2026-06-26",
   css: ["~/assets/css/main.css"],
+  devtools: { enabled: false },
   modules: ["@nuxtjs/tailwindcss"],
   runtimeConfig: {
     public: {

@@ -4,6 +4,8 @@ export default {
   content: [
     "./app.vue",
     "./app/**/*.{vue,ts}",
+    "./components/**/*.{vue,ts}",
+    "./composables/**/*.ts",
   ],
   theme: {
     extend: {
@@ -25,4 +27,3 @@ export default {
     },
   },
 } satisfies Config
-

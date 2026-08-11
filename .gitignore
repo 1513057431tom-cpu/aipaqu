@@ -25,6 +25,7 @@ coverage/
 npm-debug.log*
 
 # Local data and generated artifacts
+.codex-runtime/
 storage/
 uploads/
 exports/
