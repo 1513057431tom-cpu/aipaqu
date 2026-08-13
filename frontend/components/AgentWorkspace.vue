@@ -2,10 +2,10 @@
   <div class="space-y-5">
     <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
       <div>
-        <h2 class="text-xl font-semibold text-slate-900">Agent 中心</h2>
-        <p class="mt-1 text-sm text-slate-500">配置模型、Agent 行为与运行策略</p>
+        <h2 class="text-xl font-semibold text-slate-900">智能体中心</h2>
+        <p class="mt-1 text-sm text-slate-500">配置模型、智能体行为与运行策略</p>
       </div>
-      <div class="inline-flex h-10 w-fit rounded-md border border-slate-300 bg-white p-1" role="tablist" aria-label="Agent 中心视图">
+      <div class="inline-flex h-10 w-fit rounded-md border border-slate-300 bg-white p-1" role="tablist" aria-label="智能体中心视图">
         <button
           v-for="item in tabs"
           :key="item.key"
@@ -26,7 +26,7 @@
     </div>
     <div v-if="loading" class="flex h-48 items-center justify-center border border-slate-200 bg-white text-sm text-slate-500">
       <LoaderCircle class="mr-2 animate-spin" :size="18" aria-hidden="true" />
-      正在加载 Agent 配置...
+      正在加载智能体配置...
     </div>
 
     <template v-else-if="agent && modelConfig && agentConfig">
@@ -35,7 +35,7 @@
           <div class="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h3 id="model-config-title" class="font-semibold">模型配置</h3>
-              <p class="mt-1 text-xs text-slate-500">凭据加密保存，页面不会返回 API Key 明文</p>
+              <p class="mt-1 text-xs text-slate-500">接口密钥加密保存，页面不会返回密钥明文</p>
             </div>
             <span
               class="inline-flex w-fit items-center gap-2 rounded px-2.5 py-1 text-xs font-medium"
@@ -61,16 +61,16 @@
               </select>
             </label>
             <label class="block text-sm md:col-span-2">
-              <span class="font-medium text-slate-700">Base URL</span>
+              <span class="font-medium text-slate-700">接口地址</span>
               <input v-model="modelForm.baseUrl" class="field font-mono text-xs" maxlength="500" required type="url">
             </label>
             <label class="block text-sm md:col-span-2 xl:col-span-3">
-              <span class="font-medium text-slate-700">API Key</span>
+              <span class="font-medium text-slate-700">接口密钥</span>
               <div class="relative mt-1">
                 <input
                   v-model="modelForm.apiKey"
                   class="h-10 w-full rounded-md border border-slate-300 bg-white px-3 pr-10 font-mono text-sm outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
-                  :placeholder="modelConfig.apiKeyMasked || '输入 DeepSeek API Key'"
+                  :placeholder="modelConfig.apiKeyMasked || '输入 DeepSeek 接口密钥'"
                   :type="showApiKey ? 'text' : 'password'"
                   autocomplete="new-password"
                   maxlength="500"
@@ -98,8 +98,8 @@
 
         <section class="border border-slate-200 bg-white" aria-labelledby="agent-config-title">
           <div class="border-b border-slate-200 px-5 py-4">
-            <h3 id="agent-config-title" class="font-semibold">Agent 配置</h3>
-            <p class="mt-1 text-xs text-slate-500">定义物料监测 Agent 的职责、默认执行模式与工具边界</p>
+            <h3 id="agent-config-title" class="font-semibold">智能体配置</h3>
+            <p class="mt-1 text-xs text-slate-500">定义物料监测智能体的职责、默认执行模式与工具边界</p>
           </div>
           <form class="grid gap-5 p-5 xl:grid-cols-[minmax(0,1fr)_340px]" @submit.prevent="saveAgentConfiguration">
             <label class="block text-sm">
@@ -113,7 +113,7 @@
                 <div class="mt-2 grid grid-cols-2 rounded-md border border-slate-300 bg-slate-50 p-1">
                   <label v-for="mode in ['TEST', 'LIVE'] as const" :key="mode" class="cursor-pointer">
                     <input v-model="agentForm.defaultExecutionMode" class="sr-only" name="executionMode" type="radio" :value="mode">
-                    <span class="flex h-9 items-center justify-center rounded text-sm font-medium" :class="agentForm.defaultExecutionMode === mode ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'">{{ mode }}</span>
+                    <span class="flex h-9 items-center justify-center rounded text-sm font-medium" :class="agentForm.defaultExecutionMode === mode ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'">{{ executionModeLabel(mode) }}</span>
                   </label>
                 </div>
               </fieldset>
@@ -121,13 +121,19 @@
                 <legend class="text-sm font-medium text-slate-700">工具权限</legend>
                 <div class="mt-2 divide-y divide-slate-100 border border-slate-200">
                   <label v-for="tool in agentConfig.availableToolKeys" :key="tool" class="flex cursor-pointer items-center justify-between gap-3 px-3 py-3 text-sm hover:bg-slate-50">
-                    <span class="flex min-w-0 items-center gap-2"><Wrench :size="15" class="text-slate-400" /><span class="truncate font-mono text-xs">{{ tool }}</span></span>
+                    <span class="flex min-w-0 items-start gap-2">
+                      <Wrench :size="15" class="mt-0.5 shrink-0 text-slate-400" />
+                      <span class="min-w-0">
+                        <span class="block font-medium text-slate-700">{{ toolLabel(tool) }}</span>
+                        <span class="mt-0.5 block text-xs leading-5 text-slate-500">{{ toolDescription(tool) }}</span>
+                      </span>
+                    </span>
                     <input v-model="agentForm.toolKeys" class="h-4 w-4 accent-emerald-700" type="checkbox" :value="tool">
                   </label>
                 </div>
               </fieldset>
               <button class="h-10 w-full rounded-md bg-slate-900 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-60" :disabled="savingAgent || agentForm.toolKeys.length === 0" type="submit">
-                {{ savingAgent ? "保存中..." : "保存 Agent 配置" }}
+                {{ savingAgent ? "保存中..." : "保存智能体配置" }}
               </button>
               <p v-if="agentMessage" class="text-sm" :class="agentMessageKind === 'success' ? 'text-emerald-700' : 'text-red-700'" role="status">{{ agentMessage }}</p>
             </div>
@@ -140,7 +146,7 @@
           <button class="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-emerald-700 px-4 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-60" :disabled="running" type="button" @click="runWorkflow">
             <LoaderCircle v-if="running" class="animate-spin" :size="17" aria-hidden="true" />
             <Play v-else :size="17" aria-hidden="true" />
-            {{ running ? "运行中..." : `运行 ${agentConfig.defaultExecutionMode} 工作流` }}
+            {{ running ? "运行中..." : `运行${executionModeLabel(agentConfig.defaultExecutionMode)}工作流` }}
           </button>
         </div>
         <div class="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(300px,0.65fr)]">
@@ -149,7 +155,7 @@
             <ol class="divide-y divide-slate-100">
               <li v-for="(node, index) in workflowNodes" :key="node.key" class="flex items-start gap-4 px-5 py-4">
                 <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold text-slate-600">{{ index + 1 }}</span>
-                <div class="min-w-0 flex-1"><div class="flex items-center justify-between gap-3"><p class="font-medium">{{ node.name }}</p><span v-if="latestStep(node.key)" class="text-xs font-medium text-emerald-700">已完成</span></div><p class="mt-1 text-sm text-slate-500">{{ latestStep(node.key)?.detail || node.description }}</p></div>
+                <div class="min-w-0 flex-1"><div class="flex items-center justify-between gap-3"><p class="font-medium">{{ node.name }}</p><span v-if="latestStep(node.key)" class="text-xs font-medium text-emerald-700">已完成</span></div><p class="mt-1 text-sm text-slate-500">{{ localizedStepDetail(latestStep(node.key)?.detail || node.description) }}</p></div>
               </li>
             </ol>
           </section>
@@ -157,15 +163,15 @@
             <div class="border-b border-slate-200 px-5 py-4"><h3 id="runtime-title" class="font-semibold">当前运行配置</h3></div>
             <dl class="divide-y divide-slate-100 text-sm">
               <div class="px-5 py-4"><dt class="text-xs text-slate-500">模型</dt><dd class="mt-1 font-mono text-xs">{{ modelConfig.model }}</dd></div>
-              <div class="px-5 py-4"><dt class="text-xs text-slate-500">模式</dt><dd class="mt-1 font-medium">{{ agentConfig.defaultExecutionMode }}</dd></div>
-              <div class="px-5 py-4"><dt class="text-xs text-slate-500">工具</dt><dd class="mt-2 flex flex-wrap gap-1"><span v-for="tool in agentConfig.toolKeys" :key="tool" class="rounded bg-slate-100 px-2 py-1 font-mono text-xs">{{ tool }}</span></dd></div>
+              <div class="px-5 py-4"><dt class="text-xs text-slate-500">模式</dt><dd class="mt-1 font-medium">{{ executionModeLabel(agentConfig.defaultExecutionMode) }}</dd></div>
+              <div class="px-5 py-4"><dt class="text-xs text-slate-500">工具</dt><dd class="mt-2 flex flex-wrap gap-1"><span v-for="tool in agentConfig.toolKeys" :key="tool" class="rounded bg-slate-100 px-2 py-1 text-xs">{{ toolLabel(tool) }}</span></dd></div>
             </dl>
           </section>
         </div>
         <section class="border border-slate-200 bg-white" aria-labelledby="runs-title">
           <div class="flex items-center justify-between border-b border-slate-200 px-5 py-4"><h3 id="runs-title" class="font-semibold">最近运行</h3><span class="text-xs text-slate-500">{{ runs.length }} 条</span></div>
           <div v-if="runs.length === 0" class="flex h-36 items-center justify-center text-sm text-slate-500">尚无运行记录</div>
-          <div v-else class="overflow-x-auto"><table class="w-full min-w-[760px] text-left text-sm"><thead class="border-b border-slate-200 bg-slate-50 text-xs text-slate-500"><tr><th class="px-5 py-3">运行 ID</th><th class="px-5 py-3">模式</th><th class="px-5 py-3">状态</th><th class="px-5 py-3">模型调用</th><th class="px-5 py-3">开始时间</th></tr></thead><tbody class="divide-y divide-slate-100"><tr v-for="run in runs" :key="run.id"><td class="px-5 py-3 font-mono text-xs">{{ run.id }}</td><td class="px-5 py-3">{{ run.executionMode }}</td><td class="px-5 py-3"><span class="rounded bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">{{ run.status }}</span></td><td class="px-5 py-3">{{ run.modelInvoked ? "是" : "否" }}</td><td class="px-5 py-3 text-slate-600">{{ formatDateTime(run.startedAt) }}</td></tr></tbody></table></div>
+          <div v-else class="overflow-x-auto"><table class="w-full min-w-[760px] text-left text-sm"><thead class="border-b border-slate-200 bg-slate-50 text-xs text-slate-500"><tr><th class="px-5 py-3">运行编号</th><th class="px-5 py-3">模式</th><th class="px-5 py-3">状态</th><th class="px-5 py-3">模型调用</th><th class="px-5 py-3">开始时间</th></tr></thead><tbody class="divide-y divide-slate-100"><tr v-for="run in runs" :key="run.id"><td class="px-5 py-3 font-mono text-xs">{{ run.id }}</td><td class="px-5 py-3">{{ executionModeLabel(run.executionMode) }}</td><td class="px-5 py-3"><span class="rounded px-2 py-1 text-xs font-medium" :class="runStatusClass(run.status)">{{ runStatusLabel(run.status) }}</span></td><td class="px-5 py-3">{{ run.modelInvoked ? "是" : "否" }}</td><td class="px-5 py-3 text-slate-600">{{ formatDateTime(run.startedAt) }}</td></tr></tbody></table></div>
         </section>
       </template>
     </template>
@@ -197,6 +203,27 @@ const agentMessage = ref("")
 const agentMessageKind = ref<"success" | "error">("success")
 const modelForm = reactive({ provider: "DEEPSEEK", model: "deepseek-chat", baseUrl: "https://api.deepseek.com", apiKey: "" })
 const agentForm = reactive({ systemPrompt: "", defaultExecutionMode: "TEST" as "TEST" | "LIVE", toolKeys: [] as string[] })
+const legacySystemPrompt = "你是物料监测分析 Agent。只能依据可追溯证据识别价格、规格、可用性和交期变化；证据不足时必须明确说明，不得编造事实或替代人工采购决策。"
+const localizedSystemPrompt = "你是物料监测分析智能体。只能依据可追溯证据识别价格、规格、可用性和交期变化；证据不足时必须明确说明，不得编造事实或替代人工采购决策。"
+const executionModeLabels: Record<AgentConfiguration["defaultExecutionMode"], string> = {
+  TEST: "测试模式",
+  LIVE: "正式运行",
+}
+const toolPresentations: Record<string, { label: string; description: string }> = {
+  material_catalog: { label: "物料主数据", description: "读取物料编码、规格、分组与库存参数" },
+  monitoring_sources: { label: "外部监控来源", description: "读取已配置的网站、监测范围与采集规则" },
+  evidence_store: { label: "监测证据库", description: "读取和保存网页证据及变化快照" },
+}
+const runStatusLabels: Record<AgentRun["status"], string> = {
+  RUNNING: "运行中",
+  COMPLETED: "已完成",
+  FAILED: "运行失败",
+}
+const runStatusClasses: Record<AgentRun["status"], string> = {
+  RUNNING: "bg-amber-50 text-amber-800",
+  COMPLETED: "bg-emerald-50 text-emerald-700",
+  FAILED: "bg-red-50 text-red-700",
+}
 const workflowNodes = [
   { key: "load_scope", name: "加载监测范围", description: "解析物料范围并形成工作上下文。" },
   { key: "collect_evidence", name: "采集外部证据", description: "执行已授权的来源与证据工具。" },
@@ -206,9 +233,33 @@ const workflowNodes = [
 const latestRun = computed(() => runs.value[0] || null)
 const latestStep = (key: string) => latestRun.value?.steps.find(step => step.key === key)
 
+function executionModeLabel(mode: AgentConfiguration["defaultExecutionMode"]) {
+  return executionModeLabels[mode]
+}
+
+function toolLabel(tool: string) {
+  return toolPresentations[tool]?.label || "扩展工具"
+}
+
+function toolDescription(tool: string) {
+  return toolPresentations[tool]?.description || "按当前智能体配置调用该工具"
+}
+
+function runStatusLabel(status: AgentRun["status"]) {
+  return runStatusLabels[status]
+}
+
+function runStatusClass(status: AgentRun["status"]) {
+  return runStatusClasses[status]
+}
+
+function localizedStepDetail(detail: string) {
+  return detail.replaceAll("TEST 模式", "测试模式").replaceAll("LIVE 模式", "正式运行")
+}
+
 function applyForms() {
   if (modelConfig.value) Object.assign(modelForm, { provider: modelConfig.value.provider, model: modelConfig.value.model, baseUrl: modelConfig.value.baseUrl, apiKey: "" })
-  if (agentConfig.value) Object.assign(agentForm, { systemPrompt: agentConfig.value.systemPrompt, defaultExecutionMode: agentConfig.value.defaultExecutionMode, toolKeys: [...agentConfig.value.toolKeys] })
+  if (agentConfig.value) Object.assign(agentForm, { systemPrompt: agentConfig.value.systemPrompt === legacySystemPrompt ? localizedSystemPrompt : agentConfig.value.systemPrompt, defaultExecutionMode: agentConfig.value.defaultExecutionMode, toolKeys: [...agentConfig.value.toolKeys] })
 }
 
 async function refresh() {
@@ -227,7 +278,7 @@ async function refresh() {
     runs.value = runList.data
     applyForms()
   } catch (caught) {
-    pageError.value = errorMessage(caught, "Agent 配置加载失败。")
+    pageError.value = errorMessage(caught, "智能体配置加载失败。")
   } finally {
     loading.value = false
   }
@@ -255,7 +306,7 @@ async function testConnection() {
   try {
     const result = await request<ModelConnectionTest>("/api/v1/model-configuration/test", { method: "POST" })
     modelMessageKind.value = "success"
-    modelMessage.value = `连接成功，${result.model} 响应耗时 ${result.latencyMs} ms。`
+    modelMessage.value = `连接成功，${result.model} 响应耗时 ${result.latencyMs} 毫秒。`
   } catch (caught) {
     modelMessageKind.value = "error"
     modelMessage.value = errorMessage(caught, "DeepSeek 连接测试失败。")
@@ -271,10 +322,10 @@ async function saveAgentConfiguration() {
     agentConfig.value = await request<AgentConfiguration>("/api/v1/agents/material-monitor/configuration", { method: "PATCH", body: agentForm })
     applyForms()
     agentMessageKind.value = "success"
-    agentMessage.value = "Agent 配置已保存。"
+    agentMessage.value = "智能体配置已保存。"
   } catch (caught) {
     agentMessageKind.value = "error"
-    agentMessage.value = errorMessage(caught, "Agent 配置保存失败。")
+    agentMessage.value = errorMessage(caught, "智能体配置保存失败。")
   } finally {
     savingAgent.value = false
   }

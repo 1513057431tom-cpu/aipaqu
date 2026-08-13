@@ -89,13 +89,13 @@
             </button>
             <div class="min-w-0">
               <p class="truncate text-sm font-semibold text-slate-900">{{ currentViewLabel }}</p>
-              <p class="truncate text-xs text-slate-500">workspace {{ currentUser.workspaceId }}</p>
+              <p class="truncate text-xs text-slate-500">工作空间 {{ currentUser.workspaceId }}</p>
             </div>
           </div>
           <div class="flex min-w-0 items-center gap-3">
             <div class="hidden text-right sm:block">
               <p class="max-w-48 truncate text-sm font-medium">{{ currentUser.email }}</p>
-              <p class="text-xs text-slate-500">{{ currentUser.role }}</p>
+              <p class="text-xs text-slate-500">{{ currentUserRoleLabel }}</p>
             </div>
             <div class="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-sm font-semibold text-emerald-800" aria-hidden="true">
               {{ userInitial }}
@@ -227,8 +227,8 @@ const reportCount = ref(0)
 const loginForm = reactive({ email: "admin@example.com", password: "change-me-now" })
 
 const currentViewLabel = computed(() => ({
-  dashboard: "Dashboard",
-  agents: "Agent 中心",
+  dashboard: "工作台",
+  agents: "智能体中心",
   materials: "物料",
   suppliers: "供应商档案",
   operations: "内部数据",
@@ -239,6 +239,7 @@ const currentViewLabel = computed(() => ({
   reports: "报告中心",
 }[currentView.value]))
 const userInitial = computed(() => currentUser.value?.email.slice(0, 1).toUpperCase() || "A")
+const currentUserRoleLabel = computed(() => currentUser.value?.role === "ADMIN" ? "管理员" : "编辑人员")
 const todayLabel = computed(() => new Intl.DateTimeFormat("zh-CN", {
   dateStyle: "full",
   timeZone: "Asia/Shanghai",

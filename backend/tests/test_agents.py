@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from app.core.agents import DEFAULT_SYSTEM_PROMPT
 from app.main import create_app
 
 
@@ -114,6 +115,11 @@ def test_admin_can_update_material_monitor_agent_configuration() -> None:
     saved = client.get("/api/v1/agents/material-monitor/configuration")
     assert saved.status_code == 200
     assert saved.json() == body
+
+
+def test_default_agent_configuration_uses_chinese_customer_copy() -> None:
+    assert "物料监测分析智能体" in DEFAULT_SYSTEM_PROMPT
+    assert " Agent" not in DEFAULT_SYSTEM_PROMPT
 
 
 def test_agent_configuration_rejects_unknown_tools() -> None:

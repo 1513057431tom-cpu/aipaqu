@@ -59,8 +59,8 @@ defineEmits<{
 }>()
 
 const activeItems = [
-  { key: "dashboard" as const, label: "Dashboard", icon: LayoutDashboard },
-  { key: "agents" as const, label: "Agent 中心", icon: Bot },
+  { key: "dashboard" as const, label: "工作台", icon: LayoutDashboard },
+  { key: "agents" as const, label: "智能体中心", icon: Bot },
   { key: "materials" as const, label: "物料", icon: PackageSearch },
   { key: "suppliers" as const, label: "供应商档案", icon: Building2 },
   { key: "operations" as const, label: "内部数据", icon: Layers3 },
