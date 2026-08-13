@@ -200,6 +200,3 @@ class InMemoryCatalogStore:
             for supplier in self._suppliers.values()
         ):
             raise DuplicateCatalogCodeError("Supplier external code already exists.")
-
-
-catalog_store = InMemoryCatalogStore()

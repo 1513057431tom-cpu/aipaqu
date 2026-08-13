@@ -17,9 +17,9 @@ from app.core.catalog import (
     DuplicateCatalogCodeError,
     Material,
     Supplier,
-    catalog_store,
 )
 from app.core.errors import api_error
+from app.core.stores import catalog_store
 
 router = APIRouter(prefix="/api/v1", tags=["catalog"])
 

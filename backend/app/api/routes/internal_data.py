@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, File, Form, Header, Query, UploadFile, s
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from app.core.auth import User, get_current_user
-from app.core.catalog import Material, catalog_store
+from app.core.catalog import Material
 from app.core.errors import api_error
 from app.core.internal_data import (
     ConsumptionSnapshot,
@@ -24,8 +24,8 @@ from app.core.internal_data import (
     MaterialDemand,
     OpenSupplySnapshot,
     SourceSystem,
-    internal_data_store,
 )
+from app.core.stores import catalog_store, internal_data_store
 
 router = APIRouter(prefix="/api/v1", tags=["internal-data"])
 

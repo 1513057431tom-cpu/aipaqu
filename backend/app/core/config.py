@@ -19,6 +19,11 @@ class Settings(BaseSettings):
 
     mysql_host: str = Field(default="localhost", alias="MYSQL_HOST")
     mysql_port: int = Field(default=3306, alias="MYSQL_PORT")
+    mysql_database: str = Field(default="intelligence_reports", alias="MYSQL_DATABASE")
+    mysql_user: str = Field(default="app", alias="MYSQL_USER")
+    mysql_password: str = Field(default="", alias="MYSQL_PASSWORD")
+    storage_backend: str = Field(default="memory", alias="STORAGE_BACKEND")
+    auto_create_schema: bool = Field(default=False, alias="AUTO_CREATE_SCHEMA")
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
     elasticsearch_url: str = Field(
         default="http://localhost:9200",
@@ -26,7 +31,7 @@ class Settings(BaseSettings):
     )
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=("../.env", ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )

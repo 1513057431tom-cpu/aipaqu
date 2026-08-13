@@ -36,6 +36,7 @@ npm run dev
 | `npm test` | 在 `frontend/` 运行 Nuxt 类型检查 |
 | `npm run build` | 在 `frontend/` 构建 Nuxt 应用 |
 | `docker compose up --build` | 启动 API、前端、MySQL、Redis 和 Elasticsearch |
+| `alembic upgrade head` | 在 `backend/` 初始化或升级 MySQL 业务表 |
 
 ## 文档导航
 

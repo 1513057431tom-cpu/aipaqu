@@ -185,6 +185,3 @@ class InMemoryInternalDataStore:
         with self._lock:
             records = [item for item in self._open_supply if item.workspace_id == workspace_id]
         return sorted(records, key=lambda item: (item.expected_at, item.id))
-
-
-internal_data_store = InMemoryInternalDataStore()

@@ -5,12 +5,18 @@ services:
     env_file:
       - path: .env
         required: false
+    environment:
+      STORAGE_BACKEND: mysql
+      MYSQL_HOST: mysql
     ports:
       - "8000:8000"
     depends_on:
-      - mysql
-      - redis
-      - elasticsearch
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      elasticsearch:
+        condition: service_started
     volumes:
       - file_storage:/app/storage
 
@@ -33,6 +39,9 @@ services:
     env_file:
       - path: .env
         required: false
+    environment:
+      STORAGE_BACKEND: mysql
+      MYSQL_HOST: mysql
     command: ["python", "-m", "app.worker"]
     profiles: ["workers"]
     depends_on:
@@ -45,6 +54,9 @@ services:
     env_file:
       - path: .env
         required: false
+    environment:
+      STORAGE_BACKEND: mysql
+      MYSQL_HOST: mysql
     command: ["python", "-m", "app.worker"]
     profiles: ["workers"]
     depends_on:
@@ -71,6 +83,11 @@ services:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-change-root-me}
     ports:
       - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-change-root-me}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
     volumes:
       - mysql_data:/var/lib/mysql
 
