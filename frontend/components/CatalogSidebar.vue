@@ -72,11 +72,11 @@ const activeItems = [
   { key: "suppliers" as const, label: "供应商", icon: Building2 },
   { key: "operations" as const, label: "内部数据", icon: Layers3 },
   { key: "imports" as const, label: "数据导入", icon: Upload },
+  { key: "monitoring" as const, label: "外部监控", icon: Radar },
+  { key: "signals" as const, label: "情报信号", icon: Activity },
 ]
 
 const futureItems = [
-  { label: "外部监控", icon: Radar },
-  { label: "情报信号", icon: Activity },
   { label: "采购建议", icon: ClipboardCheck },
   { label: "周期报告", icon: FileText },
 ]

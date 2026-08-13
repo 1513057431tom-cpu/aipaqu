@@ -30,6 +30,7 @@ storage/
 uploads/
 exports/
 logs/
+*.log
 tmp/
 
 # OS and editor

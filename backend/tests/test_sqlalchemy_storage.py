@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import datetime, timezone
 
 from sqlalchemy import create_engine
@@ -5,8 +6,22 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.catalog import CatalogStatus
 from app.core.internal_data import InventorySnapshot, SourceSystem
+from app.core.monitoring import (
+    CollectionJob,
+    CollectionStatus,
+    Document,
+    ExternalSignal,
+    ReviewStatus,
+    SignalType,
+    Source,
+    SourceStatus,
+)
 from app.persistence.models import Base
-from app.persistence.stores import SqlAlchemyCatalogStore, SqlAlchemyInternalDataStore
+from app.persistence.stores import (
+    SqlAlchemyCatalogStore,
+    SqlAlchemyInternalDataStore,
+    SqlAlchemyMonitoringStore,
+)
 
 
 def create_test_engine():
@@ -80,3 +95,93 @@ def test_internal_snapshots_survive_repository_recreation() -> None:
     assert len(records) == 1
     assert records[0].available_qty == 80
     assert records[0].snapshot_at.tzinfo == timezone.utc
+
+
+def test_monitoring_evidence_and_signal_survive_repository_recreation() -> None:
+    engine = create_test_engine()
+    store = SqlAlchemyMonitoringStore(engine)
+    now = datetime(2026, 8, 13, 2, 0, tzinfo=timezone.utc)
+    source = Source(
+        id="src-db-001",
+        workspace_id="storage-test",
+        name="Public page",
+        target_url="https://example.com/price",
+        allowed_domain="example.com",
+        schedule_minutes=60,
+        signal_type=SignalType.PRICE,
+        material_id="mat-external",
+        supplier_id=None,
+        extraction_selector="main",
+        status=SourceStatus.ACTIVE,
+        last_collected_at=now,
+        last_collection_status=CollectionStatus.SUCCEEDED,
+        last_content_digest="new-digest",
+        created_at=now,
+        updated_at=now,
+    )
+    document = Document(
+        id="doc-db-001",
+        workspace_id="storage-test",
+        source_id=source.id,
+        collection_job_id="job-db-001",
+        final_url=source.target_url,
+        status_code=200,
+        content_type="text/html",
+        title="Price",
+        extracted_text="Price: 115",
+        content_digest="new-digest",
+        previous_content_digest="old-digest",
+        changed=True,
+        collected_at=now,
+    )
+    job = CollectionJob(
+        id="job-db-001",
+        workspace_id="storage-test",
+        source_id=source.id,
+        status=CollectionStatus.SUCCEEDED,
+        started_at=now,
+        finished_at=now,
+        status_code=200,
+        document_id=document.id,
+        content_changed=True,
+        error_code=None,
+        error_message=None,
+    )
+    signal = ExternalSignal(
+        id="sig-db-001",
+        workspace_id="storage-test",
+        source_id=source.id,
+        document_id=document.id,
+        signal_type=SignalType.PRICE,
+        material_id="mat-external",
+        supplier_id=None,
+        binding_key="MATERIAL:mat-external",
+        occurred_at=now,
+        observed_at=now,
+        previous_value="Price: 100",
+        current_value="Price: 115",
+        confidence=1.0,
+        evidence_ref=f"/api/v1/documents/{document.id}",
+        review_status=ReviewStatus.PENDING,
+        reviewed_by=None,
+        reviewed_at=None,
+        content_digest="new-digest",
+    )
+
+    store.create_source(source)
+    store.save_collection(source, job, document, signal)
+
+    recreated = SqlAlchemyMonitoringStore(engine)
+    assert recreated.get_source("storage-test", source.id) == source
+    assert recreated.get_document("storage-test", document.id) == document
+    assert recreated.list_signals("storage-test") == [signal]
+
+    reviewed = recreated.update_signal_review(
+        replace(
+            signal,
+            review_status=ReviewStatus.CONFIRMED,
+            reviewed_by="user-1",
+            reviewed_at=now,
+        )
+    )
+    assert recreated.get_signal("storage-test", signal.id) == reviewed

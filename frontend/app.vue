@@ -178,7 +178,9 @@
           <MaterialWorkspace v-else-if="currentView === 'materials'" @changed="refreshSummary" />
           <SupplierWorkspace v-else-if="currentView === 'suppliers'" @changed="refreshSummary" />
           <OperationsWorkspace v-else-if="currentView === 'operations'" @changed="refreshSummary" />
-          <ImportWorkspace v-else @changed="refreshSummary" />
+          <ImportWorkspace v-else-if="currentView === 'imports'" @changed="refreshSummary" />
+          <MonitoringWorkspace v-else-if="currentView === 'monitoring'" @changed="refreshSummary" />
+          <SignalWorkspace v-else />
         </div>
       </section>
     </div>
@@ -197,7 +199,7 @@ import {
   PackageSearch,
 } from "lucide-vue-next"
 
-import type { ListEnvelope, Material, PublicUser, Supplier, WorkspaceView } from "~/types/catalog"
+import type { ExternalSignal, ListEnvelope, Material, MonitoringSource, PublicUser, Supplier, WorkspaceView } from "~/types/catalog"
 
 type UserEnvelope = { user: PublicUser }
 
@@ -215,6 +217,8 @@ const summaryLoading = ref(false)
 const summaryError = ref("")
 const materialCount = ref(0)
 const supplierCount = ref(0)
+const sourceCount = ref(0)
+const signalCount = ref(0)
 const loginForm = reactive({ email: "admin@example.com", password: "change-me-now" })
 
 const currentViewLabel = computed(() => ({
@@ -223,6 +227,8 @@ const currentViewLabel = computed(() => ({
   suppliers: "供应商",
   operations: "内部数据",
   imports: "数据导入",
+  monitoring: "外部监控",
+  signals: "情报信号",
 }[currentView.value]))
 const userInitial = computed(() => currentUser.value?.email.slice(0, 1).toUpperCase() || "A")
 const todayLabel = computed(() => new Intl.DateTimeFormat("zh-CN", {
@@ -232,15 +238,15 @@ const todayLabel = computed(() => new Intl.DateTimeFormat("zh-CN", {
 const metrics = computed(() => [
   { label: "物料", value: materialCount.value, status: "主数据", view: "materials" as const, icon: PackageSearch, iconClass: "text-emerald-700" },
   { label: "供应商", value: supplierCount.value, status: "主数据", view: "suppliers" as const, icon: Building2, iconClass: "text-sky-700" },
-  { label: "外部信号", value: 0, status: "待接入", view: "dashboard" as const, icon: Activity, iconClass: "text-amber-700" },
+  { label: "外部信号", value: signalCount.value, status: sourceCount.value ? `${sourceCount.value} 个来源` : "未配置来源", view: "signals" as const, icon: Activity, iconClass: "text-amber-700" },
   { label: "采购建议", value: 0, status: "待接入", view: "dashboard" as const, icon: ClipboardCheck, iconClass: "text-slate-500" },
 ])
-const pipelineStages = [
+const pipelineStages = computed(() => [
   { step: 1, label: "内部数据", status: "进行中", className: "bg-emerald-100 text-emerald-800" },
-  { step: 2, label: "外部定向监控", status: "待开始", className: "bg-slate-100 text-slate-500" },
+  { step: 2, label: "外部定向监控", status: sourceCount.value ? "已启用" : "待配置", className: sourceCount.value ? "bg-sky-100 text-sky-800" : "bg-slate-100 text-slate-500" },
   { step: 3, label: "每日情报快照", status: "待开始", className: "bg-slate-100 text-slate-500" },
   { step: 4, label: "采购建议", status: "待开始", className: "bg-slate-100 text-slate-500" },
-]
+])
 
 function setView(view: WorkspaceView) {
   currentView.value = view
@@ -289,12 +295,16 @@ async function refreshSummary() {
   summaryLoading.value = true
   summaryError.value = ""
   try {
-    const [materials, suppliers] = await Promise.all([
+    const [materials, suppliers, sources, signals] = await Promise.all([
       request<ListEnvelope<Material>>("/api/v1/materials", { query: { pageSize: 1 } }),
       request<ListEnvelope<Supplier>>("/api/v1/suppliers", { query: { pageSize: 1 } }),
+      request<ListEnvelope<MonitoringSource>>("/api/v1/sources", { query: { pageSize: 1 } }),
+      request<ListEnvelope<ExternalSignal>>("/api/v1/external-signals", { query: { pageSize: 1 } }),
     ])
     materialCount.value = materials.pagination.totalItems
     supplierCount.value = suppliers.pagination.totalItems
+    sourceCount.value = sources.pagination.totalItems
+    signalCount.value = signals.pagination.totalItems
   } catch (error) {
     summaryError.value = errorMessage(error, "数据概览加载失败。")
   } finally {

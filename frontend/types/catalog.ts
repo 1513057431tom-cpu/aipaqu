@@ -139,4 +139,82 @@ export type InternalImportResult = {
   replayed: boolean
 }
 
-export type WorkspaceView = "dashboard" | "materials" | "suppliers" | "operations" | "imports"
+export type SignalType = "PRICE" | "SPECIFICATION" | "AVAILABILITY" | "LEAD_TIME" | "SUPPLIER_EVENT"
+
+export type MonitoringSource = {
+  id: string
+  name: string
+  targetUrl: string
+  allowedDomain: string
+  scheduleMinutes: number
+  signalType: SignalType
+  materialId: string | null
+  supplierId: string | null
+  extractionSelector: string
+  status: "ACTIVE" | "PAUSED"
+  lastCollectedAt: string | null
+  lastCollectionStatus: "SUCCEEDED" | "FAILED" | "WAITING_HUMAN" | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type CollectionJob = {
+  id: string
+  sourceId: string
+  status: "SUCCEEDED" | "FAILED" | "WAITING_HUMAN"
+  startedAt: string
+  finishedAt: string
+  statusCode: number | null
+  documentId: string | null
+  contentChanged: boolean
+  errorCode: string | null
+  errorMessage: string | null
+}
+
+export type EvidenceDocument = {
+  id: string
+  sourceId: string
+  collectionJobId: string
+  finalUrl: string
+  statusCode: number
+  contentType: string
+  title: string
+  extractedText: string
+  contentDigest: string
+  previousContentDigest: string | null
+  changed: boolean
+  collectedAt: string
+}
+
+export type ExternalSignal = {
+  id: string
+  sourceId: string
+  documentId: string
+  signalType: SignalType
+  materialId: string | null
+  supplierId: string | null
+  occurredAt: string
+  observedAt: string
+  previousValue: string
+  currentValue: string
+  confidence: number
+  evidenceRef: string
+  reviewStatus: "PENDING" | "CONFIRMED" | "DISMISSED"
+  reviewedBy: string | null
+  reviewedAt: string | null
+}
+
+export type CollectionResult = {
+  job: CollectionJob
+  document: EvidenceDocument | null
+  signal: ExternalSignal | null
+}
+
+export type WorkspaceView =
+  | "dashboard"
+  | "materials"
+  | "suppliers"
+  | "operations"
+  | "imports"
+  | "monitoring"
+  | "signals"

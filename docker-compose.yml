@@ -43,7 +43,7 @@ services:
       STORAGE_BACKEND: mysql
       MYSQL_HOST: mysql
     command: ["python", "-m", "app.worker"]
-    profiles: ["workers"]
+    profiles: ["workflow-workers"]
     depends_on:
       - redis
       - mysql
@@ -58,10 +58,9 @@ services:
       STORAGE_BACKEND: mysql
       MYSQL_HOST: mysql
     command: ["python", "-m", "app.worker"]
-    profiles: ["workers"]
     depends_on:
-      - redis
-      - mysql
+      mysql:
+        condition: service_healthy
 
   beat:
     build:
@@ -70,7 +69,7 @@ services:
       - path: .env
         required: false
     command: ["python", "-m", "app.worker"]
-    profiles: ["workers"]
+    profiles: ["workflow-workers"]
     depends_on:
       - redis
 
