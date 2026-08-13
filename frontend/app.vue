@@ -151,6 +151,10 @@
                     <div><p class="text-sm font-medium">CSV 数据导入</p><p class="mt-1 text-xs text-slate-500">字段校验、重复编码保护与错误行反馈</p></div>
                     <div class="flex items-center gap-3"><span class="status-ready">可用</span><ChevronRight :size="17" class="text-slate-400" /></div>
                   </button>
+                  <button class="flex w-full items-center justify-between gap-4 px-5 py-4 text-left hover:bg-slate-50" type="button" @click="setView('operations')">
+                    <div><p class="text-sm font-medium">经营数据快照</p><p class="mt-1 text-xs text-slate-500">库存、消耗、需求与在途供应</p></div>
+                    <div class="flex items-center gap-3"><span class="status-ready">可用</span><ChevronRight :size="17" class="text-slate-400" /></div>
+                  </button>
                 </div>
               </section>
 
@@ -173,6 +177,7 @@
 
           <MaterialWorkspace v-else-if="currentView === 'materials'" @changed="refreshSummary" />
           <SupplierWorkspace v-else-if="currentView === 'suppliers'" @changed="refreshSummary" />
+          <OperationsWorkspace v-else-if="currentView === 'operations'" @changed="refreshSummary" />
           <ImportWorkspace v-else @changed="refreshSummary" />
         </div>
       </section>
@@ -216,6 +221,7 @@ const currentViewLabel = computed(() => ({
   dashboard: "Dashboard",
   materials: "物料",
   suppliers: "供应商",
+  operations: "经营数据",
   imports: "数据导入",
 }[currentView.value]))
 const userInitial = computed(() => currentUser.value?.email.slice(0, 1).toUpperCase() || "A")
