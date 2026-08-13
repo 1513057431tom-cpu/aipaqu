@@ -22,9 +22,55 @@ export type Material = {
   baseUnit: string
   safetyStockQty: number
   leadTimeDays: number
+  groupId: string | null
   status: "ACTIVE" | "INACTIVE" | "ARCHIVED"
   createdAt: string
   updatedAt: string
+}
+
+export type MaterialGroup = {
+  id: string
+  workspaceId: string
+  code: string
+  name: string
+  parentId: string | null
+  sortOrder: number
+  materialCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type AgentDefinition = {
+  key: string
+  name: string
+  description: string
+  provider: "DEEPSEEK"
+  model: string
+  modelConfigured: boolean
+  workflowVersion: string
+  toolKeys: string[]
+}
+
+export type AgentRunStep = {
+  key: string
+  name: string
+  status: "COMPLETED" | "FAILED"
+  detail: string
+}
+
+export type AgentRun = {
+  id: string
+  agentKey: string
+  executionMode: "TEST" | "LIVE"
+  status: "RUNNING" | "COMPLETED" | "FAILED"
+  materialIds: string[]
+  steps: AgentRunStep[]
+  modelInvoked: boolean
+  summary: string
+  errorCode: string | null
+  errorMessage: string | null
+  startedAt: string
+  finishedAt: string | null
 }
 
 export type Supplier = {
@@ -282,6 +328,7 @@ export type CollectionResult = {
 
 export type WorkspaceView =
   | "dashboard"
+  | "agents"
   | "materials"
   | "suppliers"
   | "operations"

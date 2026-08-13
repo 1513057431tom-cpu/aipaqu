@@ -176,6 +176,7 @@
           </section>
 
           <MaterialWorkspace v-else-if="currentView === 'materials'" @changed="refreshSummary" />
+          <AgentWorkspace v-else-if="currentView === 'agents'" />
           <SupplierWorkspace v-else-if="currentView === 'suppliers'" @changed="refreshSummary" />
           <OperationsWorkspace v-else-if="currentView === 'operations'" @changed="refreshSummary" />
           <ImportWorkspace v-else-if="currentView === 'imports'" @changed="refreshSummary" />
@@ -227,8 +228,9 @@ const loginForm = reactive({ email: "admin@example.com", password: "change-me-no
 
 const currentViewLabel = computed(() => ({
   dashboard: "Dashboard",
+  agents: "Agent 中心",
   materials: "物料",
-  suppliers: "供应商",
+  suppliers: "供应商档案",
   operations: "内部数据",
   imports: "数据导入",
   monitoring: "外部监控",

@@ -23,7 +23,9 @@ from app.core.auth import User, get_current_user
 from app.core.catalog import (
     CatalogStatus,
     DuplicateCatalogCodeError,
+    DuplicateMaterialGroupCodeError,
     Material,
+    MaterialGroup,
     Supplier,
 )
 from app.core.errors import api_error
@@ -56,6 +58,7 @@ class CreateMaterialRequest(BaseModel):
     baseUnit: str = Field(min_length=1, max_length=32)
     safetyStockQty: float = Field(default=0, ge=0, allow_inf_nan=False)
     leadTimeDays: int = Field(default=0, ge=0, le=3650)
+    groupId: str | None = Field(default=None, max_length=64)
 
     @field_validator("externalCode", "name", "baseUnit")
     @classmethod
@@ -79,6 +82,7 @@ class UpdateMaterialRequest(BaseModel):
     baseUnit: str | None = Field(default=None, min_length=1, max_length=32)
     safetyStockQty: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     leadTimeDays: int | None = Field(default=None, ge=0, le=3650)
+    groupId: str | None = Field(default=None, max_length=64)
 
     @field_validator("externalCode", "name", "baseUnit")
     @classmethod
@@ -99,7 +103,12 @@ class UpdateMaterialRequest(BaseModel):
     def require_change(self) -> "UpdateMaterialRequest":
         if not self.model_fields_set:
             raise ValueError("At least one field must be provided.")
-        if any(getattr(self, field_name) is None for field_name in self.model_fields_set):
+        nullable_fields = {"groupId"}
+        if any(
+            getattr(self, field_name) is None
+            for field_name in self.model_fields_set
+            if field_name not in nullable_fields
+        ):
             raise ValueError("Updated fields must not be null.")
         return self
 
@@ -114,6 +123,7 @@ class MaterialResponse(BaseModel):
     baseUnit: str
     safetyStockQty: float
     leadTimeDays: int
+    groupId: str | None
     status: str
     createdAt: datetime
     updatedAt: datetime
@@ -122,6 +132,37 @@ class MaterialResponse(BaseModel):
 class MaterialListResponse(BaseModel):
     data: list[MaterialResponse]
     pagination: Pagination
+
+
+class CreateMaterialGroupRequest(BaseModel):
+    code: str = Field(min_length=1, max_length=80)
+    name: str = Field(min_length=1, max_length=120)
+    parentId: str | None = Field(default=None, max_length=64)
+    sortOrder: int = Field(default=0, ge=0, le=1_000_000)
+
+    @field_validator("code", "name")
+    @classmethod
+    def strip_group_text(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("Value must not be blank.")
+        return stripped
+
+
+class MaterialGroupResponse(BaseModel):
+    id: str
+    workspaceId: str
+    code: str
+    name: str
+    parentId: str | None
+    sortOrder: int
+    materialCount: int
+    createdAt: datetime
+    updatedAt: datetime
+
+
+class MaterialGroupListResponse(BaseModel):
+    data: list[MaterialGroupResponse]
 
 
 class CreateSupplierRequest(BaseModel):
@@ -189,9 +230,24 @@ def material_to_response(material: Material) -> MaterialResponse:
         baseUnit=material.base_unit,
         safetyStockQty=material.safety_stock_qty,
         leadTimeDays=material.lead_time_days,
+        groupId=material.group_id,
         status=material.status.value,
         createdAt=material.created_at,
         updatedAt=material.updated_at,
+    )
+
+
+def material_group_to_response(group: MaterialGroup, material_count: int) -> MaterialGroupResponse:
+    return MaterialGroupResponse(
+        id=group.id,
+        workspaceId=group.workspace_id,
+        code=group.code,
+        name=group.name,
+        parentId=group.parent_id,
+        sortOrder=group.sort_order,
+        materialCount=material_count,
+        createdAt=group.created_at,
+        updatedAt=group.updated_at,
     )
 
 
@@ -232,7 +288,15 @@ def create_material(payload: CreateMaterialRequest, user: User) -> Material:
             base_unit=payload.baseUnit,
             safety_stock_qty=payload.safetyStockQty,
             lead_time_days=payload.leadTimeDays,
+            group_id=payload.groupId,
         )
+    except LookupError as exc:
+        raise api_error(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "MATERIAL_GROUP_NOT_FOUND",
+            "Material group was not found.",
+            {"groupId": payload.groupId},
+        ) from exc
     except DuplicateCatalogCodeError as exc:
         raise api_error(
             status.HTTP_409_CONFLICT,
@@ -264,6 +328,7 @@ def create_supplier(payload: CreateSupplierRequest, user: User) -> Supplier:
 def list_materials(
     q: str = Query(default="", max_length=200),
     category: str | None = Query(default=None, max_length=120),
+    group_id: str | None = Query(default=None, alias="groupId", max_length=64),
     item_status: CatalogStatus | None = Query(default=None, alias="status"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, alias="pageSize", ge=1, le=100),
@@ -273,6 +338,7 @@ def list_materials(
         user.workspace_id,
         query=q.strip(),
         category=category.strip() if category else None,
+        group_id=group_id,
         status=item_status,
     )
     page_items, pagination = paginate(materials, page, page_size)
@@ -316,6 +382,7 @@ def patch_material(
         "baseUnit": "base_unit",
         "safetyStockQty": "safety_stock_qty",
         "leadTimeDays": "lead_time_days",
+        "groupId": "group_id",
     }
     changes = {field_names[key]: value for key, value in fields.items()}
     updated = replace(existing, **changes, updated_at=datetime.now(timezone.utc))
@@ -328,6 +395,56 @@ def patch_material(
             "A material with this external code already exists.",
             {"externalCode": updated.external_code},
         ) from exc
+    except LookupError as exc:
+        raise api_error(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "MATERIAL_GROUP_NOT_FOUND",
+            "Material group was not found.",
+            {"groupId": updated.group_id},
+        ) from exc
+
+
+@router.get("/material-groups", response_model=MaterialGroupListResponse)
+def list_material_groups(user: User = Depends(get_current_user)) -> MaterialGroupListResponse:
+    groups = catalog_store.list_material_groups(user.workspace_id)
+    counts = catalog_store.count_materials_by_group(user.workspace_id)
+    return MaterialGroupListResponse(
+        data=[material_group_to_response(group, counts.get(group.id, 0)) for group in groups]
+    )
+
+
+@router.post(
+    "/material-groups",
+    response_model=MaterialGroupResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def post_material_group(
+    payload: CreateMaterialGroupRequest,
+    user: User = Depends(get_current_user),
+) -> MaterialGroupResponse:
+    try:
+        group = catalog_store.create_material_group(
+            workspace_id=user.workspace_id,
+            code=payload.code,
+            name=payload.name,
+            parent_id=payload.parentId,
+            sort_order=payload.sortOrder,
+        )
+    except DuplicateMaterialGroupCodeError as exc:
+        raise api_error(
+            status.HTTP_409_CONFLICT,
+            "MATERIAL_GROUP_CODE_CONFLICT",
+            "A material group with this code already exists.",
+            {"code": payload.code},
+        ) from exc
+    except LookupError as exc:
+        raise api_error(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "PARENT_MATERIAL_GROUP_NOT_FOUND",
+            "Parent material group was not found.",
+            {"parentId": payload.parentId},
+        ) from exc
+    return material_group_to_response(group, 0)
 
 
 @router.get("/suppliers", response_model=SupplierListResponse)

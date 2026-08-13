@@ -25,7 +25,30 @@ class MaterialModel(Base):
     base_unit: Mapped[str] = mapped_column(String(32))
     safety_stock_qty: Mapped[float] = mapped_column(Float, default=0)
     lead_time_days: Mapped[int] = mapped_column(Integer, default=0)
+    group_id: Mapped[str | None] = mapped_column(
+        ForeignKey("material_groups.id"), nullable=True, index=True
+    )
     status: Mapped[str] = mapped_column(String(32))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class MaterialGroupModel(Base):
+    __tablename__ = "material_groups"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "code_key"),
+        Index("ix_material_groups_workspace_parent", "workspace_id", "parent_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(64))
+    code: Mapped[str] = mapped_column(String(80))
+    code_key: Mapped[str] = mapped_column(String(80))
+    name: Mapped[str] = mapped_column(String(120))
+    parent_id: Mapped[str | None] = mapped_column(
+        ForeignKey("material_groups.id"), nullable=True
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
@@ -342,3 +365,24 @@ class ReportVersionModel(Base):
     change_source: Mapped[str] = mapped_column(String(32))
     created_by: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime())
+
+
+class AgentRunModel(Base):
+    __tablename__ = "agent_runs"
+    __table_args__ = (
+        Index("ix_agent_runs_workspace_started", "workspace_id", "started_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(64))
+    agent_key: Mapped[str] = mapped_column(String(80))
+    execution_mode: Mapped[str] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(String(32))
+    material_ids_json: Mapped[str] = mapped_column(Text)
+    steps_json: Mapped[str] = mapped_column(Text)
+    model_invoked: Mapped[int] = mapped_column(Integer, default=0)
+    summary: Mapped[str] = mapped_column(Text)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(), nullable=True)

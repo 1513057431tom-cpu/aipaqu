@@ -38,6 +38,7 @@
 <script setup lang="ts">
 import {
   Activity,
+  Bot,
   Building2,
   ClipboardCheck,
   FileText,
@@ -59,8 +60,9 @@ defineEmits<{
 
 const activeItems = [
   { key: "dashboard" as const, label: "Dashboard", icon: LayoutDashboard },
+  { key: "agents" as const, label: "Agent 中心", icon: Bot },
   { key: "materials" as const, label: "物料", icon: PackageSearch },
-  { key: "suppliers" as const, label: "供应商", icon: Building2 },
+  { key: "suppliers" as const, label: "供应商档案", icon: Building2 },
   { key: "operations" as const, label: "内部数据", icon: Layers3 },
   { key: "imports" as const, label: "数据导入", icon: Upload },
   { key: "monitoring" as const, label: "外部监控", icon: Radar },

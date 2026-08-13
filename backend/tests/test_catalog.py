@@ -134,6 +134,52 @@ def test_update_material_validates_not_found_conflict_and_empty_patch() -> None:
     assert null_value.status_code == 422
 
 
+def test_material_groups_form_a_tree_and_filter_materials() -> None:
+    client = TestClient(create_app())
+    login(client)
+
+    root = client.post(
+        "/api/v1/material-groups",
+        json={"code": "TEST-RAW", "name": "原材料"},
+    )
+    assert root.status_code == 201
+    child = client.post(
+        "/api/v1/material-groups",
+        json={
+            "code": "TEST-RAW-SOLVENT",
+            "name": "溶剂",
+            "parentId": root.json()["id"],
+        },
+    )
+    assert child.status_code == 201
+
+    material = client.post(
+        "/api/v1/materials",
+        json={
+            "externalCode": "TEST-GROUP-MAT-001",
+            "name": "测试溶剂",
+            "baseUnit": "kg",
+            "groupId": child.json()["id"],
+        },
+    )
+    assert material.status_code == 201
+    assert material.json()["groupId"] == child.json()["id"]
+
+    groups = client.get("/api/v1/material-groups")
+    assert groups.status_code == 200
+    group_by_id = {item["id"]: item for item in groups.json()["data"]}
+    assert group_by_id[root.json()["id"]]["parentId"] is None
+    assert group_by_id[child.json()["id"]]["parentId"] == root.json()["id"]
+    assert group_by_id[child.json()["id"]]["materialCount"] == 1
+
+    filtered = client.get(
+        "/api/v1/materials",
+        params={"groupId": child.json()["id"]},
+    )
+    assert filtered.status_code == 200
+    assert [item["id"] for item in filtered.json()["data"]] == [material.json()["id"]]
+
+
 def test_create_and_list_suppliers() -> None:
     client = TestClient(create_app())
     login(client)

@@ -6,14 +6,16 @@ from dataclasses import asdict
 from datetime import date, datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import Engine, select, update
+from sqlalchemy import Engine, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.catalog import (
     CatalogStatus,
     DuplicateCatalogCodeError,
+    DuplicateMaterialGroupCodeError,
     Material,
+    MaterialGroup,
     Supplier,
 )
 from app.core.internal_data import (
@@ -65,6 +67,7 @@ from app.persistence.models import (
     InternalImportModel,
     InventorySnapshotModel,
     MaterialDemandModel,
+    MaterialGroupModel,
     MaterialModel,
     OpenSupplySnapshotModel,
     ProcurementRecommendationModel,
@@ -95,7 +98,21 @@ def material_from_model(model: MaterialModel) -> Material:
         base_unit=model.base_unit,
         safety_stock_qty=model.safety_stock_qty,
         lead_time_days=model.lead_time_days,
+        group_id=model.group_id,
         status=CatalogStatus(model.status),
+        created_at=utc_aware(model.created_at),
+        updated_at=utc_aware(model.updated_at),
+    )
+
+
+def material_group_from_model(model: MaterialGroupModel) -> MaterialGroup:
+    return MaterialGroup(
+        id=model.id,
+        workspace_id=model.workspace_id,
+        code=model.code,
+        name=model.name,
+        parent_id=model.parent_id,
+        sort_order=model.sort_order,
         created_at=utc_aware(model.created_at),
         updated_at=utc_aware(model.updated_at),
     )
@@ -130,7 +147,10 @@ class SqlAlchemyCatalogStore:
         base_unit: str,
         safety_stock_qty: float,
         lead_time_days: int,
+        group_id: str | None = None,
     ) -> Material:
+        if group_id is not None and self.get_material_group(workspace_id, group_id) is None:
+            raise LookupError("Material group was not found.")
         now = datetime.now(timezone.utc)
         model = MaterialModel(
             id=f"mat_{uuid4().hex}",
@@ -143,6 +163,7 @@ class SqlAlchemyCatalogStore:
             base_unit=base_unit,
             safety_stock_qty=safety_stock_qty,
             lead_time_days=lead_time_days,
+            group_id=group_id,
             status=CatalogStatus.ACTIVE.value,
             created_at=utc_naive(now),
             updated_at=utc_naive(now),
@@ -162,11 +183,14 @@ class SqlAlchemyCatalogStore:
         *,
         query: str = "",
         category: str | None = None,
+        group_id: str | None = None,
         status: CatalogStatus | None = None,
     ) -> list[Material]:
         statement = select(MaterialModel).where(MaterialModel.workspace_id == workspace_id)
         if category is not None:
             statement = statement.where(MaterialModel.category == category)
+        if group_id is not None:
+            statement = statement.where(MaterialModel.group_id == group_id)
         if status is not None:
             statement = statement.where(MaterialModel.status == status.value)
         with Session(self.engine) as session:
@@ -217,6 +241,11 @@ class SqlAlchemyCatalogStore:
             )
             if model is None:
                 raise LookupError("Material was not found.")
+            if (
+                material.group_id is not None
+                and self.get_material_group(material.workspace_id, material.group_id) is None
+            ):
+                raise LookupError("Material group was not found.")
             model.external_code = material.external_code
             model.external_code_key = material.external_code.casefold()
             model.name = material.name
@@ -225,6 +254,7 @@ class SqlAlchemyCatalogStore:
             model.base_unit = material.base_unit
             model.safety_stock_qty = material.safety_stock_qty
             model.lead_time_days = material.lead_time_days
+            model.group_id = material.group_id
             model.updated_at = utc_naive(material.updated_at)
             try:
                 session.commit()
@@ -235,6 +265,68 @@ class SqlAlchemyCatalogStore:
                 ) from exc
             session.refresh(model)
             return material_from_model(model)
+
+    def create_material_group(
+        self,
+        *,
+        workspace_id: str,
+        code: str,
+        name: str,
+        parent_id: str | None,
+        sort_order: int,
+    ) -> MaterialGroup:
+        if parent_id is not None and self.get_material_group(workspace_id, parent_id) is None:
+            raise LookupError("Material group was not found.")
+        now = datetime.now(timezone.utc)
+        model = MaterialGroupModel(
+            id=f"grp_{uuid4().hex}",
+            workspace_id=workspace_id,
+            code=code,
+            code_key=code.casefold(),
+            name=name,
+            parent_id=parent_id,
+            sort_order=sort_order,
+            created_at=utc_naive(now),
+            updated_at=utc_naive(now),
+        )
+        with Session(self.engine) as session:
+            session.add(model)
+            try:
+                session.commit()
+            except IntegrityError as exc:
+                raise DuplicateMaterialGroupCodeError(
+                    "Material group code already exists."
+                ) from exc
+            session.refresh(model)
+        return material_group_from_model(model)
+
+    def list_material_groups(self, workspace_id: str) -> list[MaterialGroup]:
+        with Session(self.engine) as session:
+            models = session.scalars(
+                select(MaterialGroupModel).where(MaterialGroupModel.workspace_id == workspace_id)
+            ).all()
+        groups = [material_group_from_model(model) for model in models]
+        return sorted(groups, key=lambda item: (item.sort_order, item.name.casefold(), item.id))
+
+    def get_material_group(self, workspace_id: str, group_id: str) -> MaterialGroup | None:
+        with Session(self.engine) as session:
+            model = session.scalar(
+                select(MaterialGroupModel).where(
+                    MaterialGroupModel.workspace_id == workspace_id,
+                    MaterialGroupModel.id == group_id,
+                )
+            )
+        return material_group_from_model(model) if model else None
+
+    def count_materials_by_group(self, workspace_id: str) -> dict[str, int]:
+        with Session(self.engine) as session:
+            rows = session.execute(
+                select(MaterialModel.group_id, func.count(MaterialModel.id)).where(
+                    MaterialModel.workspace_id == workspace_id,
+                    MaterialModel.group_id.is_not(None),
+                ).group_by(MaterialModel.group_id)
+            ).all()
+        return {group_id: count for group_id, count in rows if group_id is not None}
 
     def create_supplier(
         self,
