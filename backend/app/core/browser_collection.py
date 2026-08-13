@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
 
@@ -64,22 +66,36 @@ class CloakBrowserFetcher:
         "register",
     )
 
-    def __init__(self, agent_service: AgentService, catalog_store, max_actions: int = 8) -> None:
+    def __init__(
+        self,
+        agent_service: AgentService,
+        catalog_store,
+        max_actions: int = 4,
+        collection_timeout_seconds: int = 100,
+    ) -> None:
         self.agent_service = agent_service
         self.catalog_store = catalog_store
         self.max_actions = max_actions
+        self.collection_timeout_seconds = collection_timeout_seconds
 
     def fetch(self, source: Source) -> FetchResult:
         try:
             from cloakbrowser import launch
+            from cloakbrowser.config import get_binary_path
         except ImportError as exc:
             raise BrowserRuntimeUnavailableError(
-                "CloakBrowser runtime is not installed. Install the browser optional dependency first."
+                "CloakBrowser 运行组件未安装，请先安装服务端浏览器依赖。"
             ) from exc
+
+        binary_path = Path(get_binary_path())
+        if not binary_path.is_file():
+            raise BrowserRuntimeUnavailableError(
+                "CloakBrowser 浏览器内核尚未安装，请先在服务端执行 python -m cloakbrowser install。"
+            )
 
         model = self.agent_service.get_model_configuration(source.workspace_id)
         if not model.api_key:
-            raise BrowserRuntimeUnavailableError("DeepSeek API key is not configured.")
+            raise BrowserRuntimeUnavailableError("DeepSeek 接口密钥尚未配置。")
         prompt = self.agent_service.get_agent_configuration(
             source.workspace_id, "web-navigator"
         ).system_prompt
@@ -89,13 +105,19 @@ class CloakBrowserFetcher:
             browser = launch(headless=True, humanize=True)
         except Exception as exc:
             raise BrowserRuntimeUnavailableError(
-                "CloakBrowser could not start. Configure its license and browser binary first."
+                "CloakBrowser 无法启动，请检查许可证和浏览器内核。"
             ) from exc
         try:
             page = browser.new_page()
-            response = page.goto(source.target_url, wait_until="domcontentloaded", timeout=30_000)
+            deadline = time.monotonic() + self.collection_timeout_seconds
+            page.set_default_timeout(5_000)
+            response = page.goto(source.target_url, wait_until="domcontentloaded", timeout=20_000)
             self._validate_current_url(page.url, source.allowed_domain)
             for _ in range(self.max_actions):
+                if time.monotonic() >= deadline:
+                    raise BrowserCollectionError(
+                        f"智能浏览采集超过 {self.collection_timeout_seconds} 秒，已主动停止。"
+                    )
                 self._raise_for_access_challenge(page)
                 candidates = self._candidates(page)
                 decision = planner.invoke(
@@ -136,7 +158,7 @@ class CloakBrowserFetcher:
             raise
         except Exception as exc:
             raise BrowserCollectionError(
-                f"Intelligent browser collection failed ({type(exc).__name__})."
+                f"智能浏览采集失败（{type(exc).__name__}）。"
             ) from exc
         finally:
             browser.close()
@@ -170,32 +192,34 @@ class CloakBrowserFetcher:
             base_url=model.base_url,
             model=model.model,
             temperature=0,
+            timeout=20,
+            max_retries=0,
         ).with_structured_output(schema)
 
     @staticmethod
     def _candidates(page) -> list[dict]:
         locator = page.locator("input, button, a, [role=tab], [role=button]")
-        candidates: list[dict] = []
-        for index in range(min(locator.count(), 80)):
-            item = locator.nth(index)
-            try:
-                if not item.is_visible():
-                    continue
-                candidates.append(
-                    {
-                        "id": index,
-                        "tag": item.evaluate("el => el.tagName.toLowerCase()"),
-                        "text": (item.inner_text(timeout=1_000) or "")[:160],
-                        "type": item.get_attribute("type") or "",
-                        "role": item.get_attribute("role") or "",
-                        "placeholder": item.get_attribute("placeholder") or "",
-                        "aria_label": item.get_attribute("aria-label") or "",
-                        "href": item.get_attribute("href") or "",
-                    }
-                )
-            except Exception:
-                continue
-        return candidates
+        return locator.evaluate_all(
+            """
+            elements => elements.slice(0, 80).map((element, id) => {
+              const rect = element.getBoundingClientRect();
+              const style = window.getComputedStyle(element);
+              const visible = rect.width > 0 && rect.height > 0
+                && style.display !== "none" && style.visibility !== "hidden";
+              if (!visible) return null;
+              return {
+                id,
+                tag: element.tagName.toLowerCase(),
+                text: (element.innerText || element.textContent || "").trim().slice(0, 160),
+                type: element.getAttribute("type") || "",
+                role: element.getAttribute("role") || "",
+                placeholder: element.getAttribute("placeholder") || "",
+                aria_label: element.getAttribute("aria-label") || "",
+                href: element.getAttribute("href") || "",
+              };
+            }).filter(Boolean)
+            """
+        )
 
     def _execute(
         self,
@@ -269,7 +293,7 @@ class LangChainSignalAnalyzer:
     ) -> SignalAnalysis:
         model = self.agent_service.get_model_configuration(source.workspace_id)
         if not model.api_key:
-            raise BrowserRuntimeUnavailableError("DeepSeek API key is not configured.")
+            raise BrowserRuntimeUnavailableError("DeepSeek 接口密钥尚未配置。")
         prompt = self.agent_service.get_agent_configuration(
             source.workspace_id, "intelligence-analyst"
         ).system_prompt
