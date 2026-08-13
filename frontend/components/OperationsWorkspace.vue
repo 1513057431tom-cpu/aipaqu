@@ -2,8 +2,8 @@
   <div class="space-y-5">
     <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div>
-        <p class="text-xs font-semibold uppercase text-emerald-700">Internal operations</p>
-        <h2 class="mt-1 text-xl font-semibold text-slate-900">经营数据</h2>
+        <p class="text-xs font-semibold uppercase text-emerald-700">Internal data</p>
+        <h2 class="mt-1 text-xl font-semibold text-slate-900">内部数据</h2>
         <p class="mt-1 text-sm text-slate-500">库存、消耗、需求与在途供应的只读快照</p>
       </div>
       <button
@@ -12,7 +12,7 @@
         @click="showImporter = !showImporter"
       >
         <Upload :size="17" aria-hidden="true" />
-        {{ showImporter ? "收起导入" : "导入经营数据" }}
+        {{ showImporter ? "收起导入" : "导入内部数据" }}
       </button>
     </div>
 
@@ -95,7 +95,7 @@
       </div>
 
       <div v-if="loading" class="flex min-h-56 items-center justify-center text-sm text-slate-500">
-        <LoaderCircle class="mr-2 animate-spin" :size="18" aria-hidden="true" />正在加载经营数据...
+        <LoaderCircle class="mr-2 animate-spin" :size="18" aria-hidden="true" />正在加载内部数据...
       </div>
       <div v-else-if="loadError" class="flex min-h-56 flex-col items-center justify-center px-6 text-center" role="alert">
         <CircleAlert :size="28" class="text-red-600" aria-hidden="true" />
@@ -265,7 +265,7 @@ async function submitImport() {
     await loadData()
     emit("changed")
   } catch (error) {
-    importError.value = errorMessage(error, "经营数据导入失败，请检查字段、物料编码和数量口径。")
+    importError.value = errorMessage(error, "内部数据导入失败，请检查字段、物料编码和数量口径。")
   } finally {
     uploading.value = false
   }
@@ -281,7 +281,7 @@ async function loadData() {
       counts[tab.key] = results[index].pagination.totalItems
     })
   } catch (error) {
-    loadError.value = errorMessage(error, "经营数据加载失败。")
+    loadError.value = errorMessage(error, "内部数据加载失败。")
   } finally {
     loading.value = false
   }

@@ -70,7 +70,7 @@ const activeItems = [
   { key: "dashboard" as const, label: "Dashboard", icon: LayoutDashboard },
   { key: "materials" as const, label: "物料", icon: PackageSearch },
   { key: "suppliers" as const, label: "供应商", icon: Building2 },
-  { key: "operations" as const, label: "经营数据", icon: Layers3 },
+  { key: "operations" as const, label: "内部数据", icon: Layers3 },
   { key: "imports" as const, label: "数据导入", icon: Upload },
 ]
 

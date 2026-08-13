@@ -11,7 +11,7 @@
           <p class="text-xs font-semibold uppercase text-emerald-200">Aipaqu</p>
           <h1 class="mt-4 max-w-lg text-3xl font-semibold leading-tight">物料与供应情报平台</h1>
           <p class="mt-4 max-w-md text-sm leading-6 text-emerald-100">
-            内部经营数据、外部变化信号与可解释采购建议的统一工作台。
+            内部数据、外部变化信号与可解释采购建议的统一工作台。
           </p>
         </div>
         <div class="grid grid-cols-3 gap-6 border-t border-emerald-700 pt-6 text-sm">
@@ -152,7 +152,7 @@
                     <div class="flex items-center gap-3"><span class="status-ready">可用</span><ChevronRight :size="17" class="text-slate-400" /></div>
                   </button>
                   <button class="flex w-full items-center justify-between gap-4 px-5 py-4 text-left hover:bg-slate-50" type="button" @click="setView('operations')">
-                    <div><p class="text-sm font-medium">经营数据快照</p><p class="mt-1 text-xs text-slate-500">库存、消耗、需求与在途供应</p></div>
+                    <div><p class="text-sm font-medium">内部数据快照</p><p class="mt-1 text-xs text-slate-500">库存、消耗、需求与在途供应</p></div>
                     <div class="flex items-center gap-3"><span class="status-ready">可用</span><ChevronRight :size="17" class="text-slate-400" /></div>
                   </button>
                 </div>
@@ -221,7 +221,7 @@ const currentViewLabel = computed(() => ({
   dashboard: "Dashboard",
   materials: "物料",
   suppliers: "供应商",
-  operations: "经营数据",
+  operations: "内部数据",
   imports: "数据导入",
 }[currentView.value]))
 const userInitial = computed(() => currentUser.value?.email.slice(0, 1).toUpperCase() || "A")
@@ -236,7 +236,7 @@ const metrics = computed(() => [
   { label: "采购建议", value: 0, status: "待接入", view: "dashboard" as const, icon: ClipboardCheck, iconClass: "text-slate-500" },
 ])
 const pipelineStages = [
-  { step: 1, label: "内部主数据", status: "进行中", className: "bg-emerald-100 text-emerald-800" },
+  { step: 1, label: "内部数据", status: "进行中", className: "bg-emerald-100 text-emerald-800" },
   { step: 2, label: "外部定向监控", status: "待开始", className: "bg-slate-100 text-slate-500" },
   { step: 3, label: "每日情报快照", status: "待开始", className: "bg-slate-100 text-slate-500" },
   { step: 4, label: "采购建议", status: "待开始", className: "bg-slate-100 text-slate-500" },
