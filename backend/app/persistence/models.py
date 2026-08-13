@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 
 from sqlalchemy import Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -281,4 +282,63 @@ class RecommendationDecisionModel(Base):
     adjusted_qty: Mapped[float | None] = mapped_column(Float, nullable=True)
     reason: Mapped[str] = mapped_column(String(500))
     actor_id: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime())
+
+
+class DailyIntelligenceSnapshotModel(Base):
+    __tablename__ = "daily_intelligence_snapshots"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "covered_date"),
+        Index("ix_daily_snapshots_workspace_status_date", "workspace_id", "status", "covered_date"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(64))
+    covered_date: Mapped[date] = mapped_column(Date())
+    timezone: Mapped[str] = mapped_column(String(64))
+    structured_data_json: Mapped[str] = mapped_column(Text().with_variant(mysql.LONGTEXT(), "mysql"))
+    content_digest: Mapped[str] = mapped_column(String(80))
+    status: Mapped[str] = mapped_column(String(32))
+    approved_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime())
+
+
+class ReportModel(Base):
+    __tablename__ = "reports"
+    __table_args__ = (
+        Index("ix_reports_workspace_period_start", "workspace_id", "report_period", "period_start"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(64))
+    title: Mapped[str] = mapped_column(String(200))
+    report_period: Mapped[str] = mapped_column(String(16))
+    input_mode: Mapped[str] = mapped_column(String(40))
+    period_start: Mapped[date] = mapped_column(Date())
+    period_end: Mapped[date] = mapped_column(Date())
+    status: Mapped[str] = mapped_column(String(32))
+    current_version_id: Mapped[str] = mapped_column(String(64))
+    input_snapshot_ids_json: Mapped[str] = mapped_column(Text)
+    input_snapshot_dates_json: Mapped[str] = mapped_column(Text)
+    approved_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime())
+    updated_at: Mapped[datetime] = mapped_column(DateTime())
+
+
+class ReportVersionModel(Base):
+    __tablename__ = "report_versions"
+    __table_args__ = (
+        UniqueConstraint("report_id", "version"),
+        Index("ix_report_versions_report_created", "report_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    report_id: Mapped[str] = mapped_column(ForeignKey("reports.id"))
+    version: Mapped[int] = mapped_column(Integer)
+    markdown: Mapped[str] = mapped_column(Text().with_variant(mysql.LONGTEXT(), "mysql"))
+    content_digest: Mapped[str] = mapped_column(String(80))
+    change_source: Mapped[str] = mapped_column(String(32))
+    created_by: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime())

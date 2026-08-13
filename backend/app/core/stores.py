@@ -5,6 +5,7 @@ from app.core.config import get_settings
 from app.core.internal_data import InMemoryInternalDataStore
 from app.core.monitoring import InMemoryMonitoringStore
 from app.core.recommendations import InMemoryRecommendationStore
+from app.core.reports import InMemoryReportStore
 
 
 def build_stores():
@@ -15,6 +16,7 @@ def build_stores():
             InMemoryInternalDataStore(),
             InMemoryMonitoringStore(),
             InMemoryRecommendationStore(),
+            InMemoryReportStore(),
         )
 
     from app.persistence.database import get_database_engine, initialize_database
@@ -23,6 +25,7 @@ def build_stores():
         SqlAlchemyInternalDataStore,
         SqlAlchemyMonitoringStore,
         SqlAlchemyRecommendationStore,
+        SqlAlchemyReportStore,
     )
 
     engine = get_database_engine()
@@ -33,7 +36,8 @@ def build_stores():
         SqlAlchemyInternalDataStore(engine),
         SqlAlchemyMonitoringStore(engine),
         SqlAlchemyRecommendationStore(engine),
+        SqlAlchemyReportStore(engine),
     )
 
 
-catalog_store, internal_data_store, monitoring_store, recommendation_store = build_stores()
+catalog_store, internal_data_store, monitoring_store, recommendation_store, report_store = build_stores()

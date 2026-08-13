@@ -8,7 +8,7 @@
 
 ## 当前阶段
 
-仓库已包含 FastAPI 后端、Nuxt 前端、登录会话、`ResearchBrief` 试验闭环和 Docker Compose。当前正在把领域模型升级为物料、供应商、内部快照、外部信号和采购建议，并保留 `ResearchBrief` 作为后续自定义分析能力。
+首个可运行的 v0.1 核心闭环已完成：FastAPI、Nuxt、MySQL 持久化、物料与供应商、CSV 内部快照导入、外部定向监控、信号审核、确定性采购建议、日报快照、周报/月报聚合、人工版本和 Markdown/DOCX 导出。`ResearchBrief` 保留为后续自定义分析能力。
 
 ## Quick Start
 
@@ -27,6 +27,8 @@ cd ../frontend
 npm install
 npm run dev
 ```
+
+使用本机 MySQL 时，在未提交的 `.env` 中配置 `MYSQL_HOST`、`MYSQL_PORT`、`MYSQL_DATABASE`、`MYSQL_USER` 和 `MYSQL_PASSWORD`，再于 `backend/` 执行 `python -m alembic upgrade head`。业务进程应使用独立低权限账号，不使用 MySQL root 账号。
 
 ## Commands
 
@@ -78,4 +80,4 @@ npm run dev
 
 ## MVP 闭环
 
-首版优先交付：登录、Excel/CSV 内部数据导入、物料与供应商映射、20 至 50 个指定页面监控、变化信号抽取、每日情报快照、可解释采购建议、人工审核，以及日报/周报/月报的 Markdown/DOCX 导出。ERP/MES/WMS 标准连接器、自动写回、高级预测、PDF 和消息交付在闭环稳定后逐步增强。
+v0.1 核心闭环已交付：登录、CSV 内部数据导入、物料与供应商、指定公开页面的手动采集、变化信号、每日情报快照、可解释采购建议、人工审核，以及日报/周报/月报的 Markdown/DOCX 导出。Excel 原生解析、定时调度、ERP/MES/WMS 标准连接器、自动写回、高级预测、PDF、消息交付和复杂浏览器站点适配器在闭环稳定后逐步增强。

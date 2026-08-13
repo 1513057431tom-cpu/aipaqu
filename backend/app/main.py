@@ -9,6 +9,7 @@ from app.api.routes.health import router as health_router
 from app.api.routes.internal_data import router as internal_data_router
 from app.api.routes.monitoring import router as monitoring_router
 from app.api.routes.recommendations import router as recommendations_router
+from app.api.routes.reports import router as reports_router
 from app.core.config import get_settings
 
 
@@ -49,6 +50,7 @@ def create_app() -> FastAPI:
     app.include_router(internal_data_router)
     app.include_router(monitoring_router)
     app.include_router(recommendations_router)
+    app.include_router(reports_router)
     app.include_router(health_router)
     return app
 

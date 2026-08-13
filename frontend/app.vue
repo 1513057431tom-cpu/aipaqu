@@ -181,7 +181,8 @@
           <ImportWorkspace v-else-if="currentView === 'imports'" @changed="refreshSummary" />
           <MonitoringWorkspace v-else-if="currentView === 'monitoring'" @changed="refreshSummary" />
           <SignalWorkspace v-else-if="currentView === 'signals'" />
-          <RecommendationWorkspace v-else @changed="refreshSummary" />
+          <RecommendationWorkspace v-else-if="currentView === 'recommendations'" @changed="refreshSummary" />
+          <ReportWorkspace v-else @changed="refreshSummary" />
         </div>
       </section>
     </div>
@@ -200,7 +201,7 @@ import {
   PackageSearch,
 } from "lucide-vue-next"
 
-import type { ExternalSignal, ListEnvelope, Material, MonitoringSource, ProcurementRecommendation, PublicUser, Supplier, WorkspaceView } from "~/types/catalog"
+import type { ExternalSignal, IntelligenceReport, ListEnvelope, Material, MonitoringSource, ProcurementRecommendation, PublicUser, Supplier, WorkspaceView } from "~/types/catalog"
 
 type UserEnvelope = { user: PublicUser }
 
@@ -221,6 +222,7 @@ const supplierCount = ref(0)
 const sourceCount = ref(0)
 const signalCount = ref(0)
 const recommendationCount = ref(0)
+const reportCount = ref(0)
 const loginForm = reactive({ email: "admin@example.com", password: "change-me-now" })
 
 const currentViewLabel = computed(() => ({
@@ -232,6 +234,7 @@ const currentViewLabel = computed(() => ({
   monitoring: "外部监控",
   signals: "情报信号",
   recommendations: "采购建议",
+  reports: "报告中心",
 }[currentView.value]))
 const userInitial = computed(() => currentUser.value?.email.slice(0, 1).toUpperCase() || "A")
 const todayLabel = computed(() => new Intl.DateTimeFormat("zh-CN", {
@@ -247,7 +250,7 @@ const metrics = computed(() => [
 const pipelineStages = computed(() => [
   { step: 1, label: "内部数据", status: "进行中", className: "bg-emerald-100 text-emerald-800" },
   { step: 2, label: "外部定向监控", status: sourceCount.value ? "已启用" : "待配置", className: sourceCount.value ? "bg-sky-100 text-sky-800" : "bg-slate-100 text-slate-500" },
-  { step: 3, label: "每日情报快照", status: "待开始", className: "bg-slate-100 text-slate-500" },
+  { step: 3, label: "每日情报快照", status: reportCount.value ? "已生成" : "待开始", className: reportCount.value ? "bg-sky-100 text-sky-800" : "bg-slate-100 text-slate-500" },
   { step: 4, label: "采购建议", status: recommendationCount.value ? "已生成" : "待开始", className: recommendationCount.value ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-500" },
 ])
 
@@ -298,18 +301,20 @@ async function refreshSummary() {
   summaryLoading.value = true
   summaryError.value = ""
   try {
-    const [materials, suppliers, sources, signals, recommendations] = await Promise.all([
+    const [materials, suppliers, sources, signals, recommendations, reports] = await Promise.all([
       request<ListEnvelope<Material>>("/api/v1/materials", { query: { pageSize: 1 } }),
       request<ListEnvelope<Supplier>>("/api/v1/suppliers", { query: { pageSize: 1 } }),
       request<ListEnvelope<MonitoringSource>>("/api/v1/sources", { query: { pageSize: 1 } }),
       request<ListEnvelope<ExternalSignal>>("/api/v1/external-signals", { query: { pageSize: 1 } }),
       request<ListEnvelope<ProcurementRecommendation>>("/api/v1/procurement-recommendations", { query: { pageSize: 1 } }),
+      request<{ data: IntelligenceReport[] }>("/api/v1/reports", { query: { pageSize: 1 } }),
     ])
     materialCount.value = materials.pagination.totalItems
     supplierCount.value = suppliers.pagination.totalItems
     sourceCount.value = sources.pagination.totalItems
     signalCount.value = signals.pagination.totalItems
     recommendationCount.value = recommendations.pagination.totalItems
+    reportCount.value = reports.data.length
   } catch (error) {
     summaryError.value = errorMessage(error, "数据概览加载失败。")
   } finally {

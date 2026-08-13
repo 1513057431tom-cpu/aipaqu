@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import hashlib
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy import Engine, select, update
@@ -47,9 +47,19 @@ from app.core.recommendations import (
     RecommendationVersionConflictError,
     RiskLevel,
 )
+from app.core.reports import (
+    DailyIntelligenceSnapshot,
+    DuplicateDailyReportError,
+    Report,
+    ReportPeriod,
+    ReportStatus,
+    ReportVersion,
+    SnapshotStatus,
+)
 from app.persistence.models import (
     CollectionJobModel,
     ConsumptionSnapshotModel,
+    DailyIntelligenceSnapshotModel,
     DocumentModel,
     ExternalSignalModel,
     InternalImportModel,
@@ -59,6 +69,8 @@ from app.persistence.models import (
     OpenSupplySnapshotModel,
     ProcurementRecommendationModel,
     RecommendationDecisionModel,
+    ReportModel,
+    ReportVersionModel,
     SourceModel,
     SupplierModel,
 )
@@ -854,6 +866,221 @@ class SqlAlchemyRecommendationStore:
             version=item.version,
             created_at=utc_naive(item.created_at),
             updated_at=utc_naive(item.updated_at),
+        )
+
+
+def report_from_model(model: ReportModel) -> Report:
+    return Report(
+        id=model.id,
+        workspace_id=model.workspace_id,
+        title=model.title,
+        report_period=ReportPeriod(model.report_period),
+        input_mode=model.input_mode,
+        period_start=model.period_start,
+        period_end=model.period_end,
+        status=ReportStatus(model.status),
+        current_version_id=model.current_version_id,
+        input_snapshot_ids=tuple(json.loads(model.input_snapshot_ids_json)),
+        input_snapshot_dates=tuple(date.fromisoformat(item) for item in json.loads(model.input_snapshot_dates_json)),
+        approved_by=model.approved_by,
+        approved_at=utc_aware(model.approved_at) if model.approved_at else None,
+        created_at=utc_aware(model.created_at),
+        updated_at=utc_aware(model.updated_at),
+    )
+
+
+def report_version_from_model(model: ReportVersionModel) -> ReportVersion:
+    return ReportVersion(
+        id=model.id,
+        report_id=model.report_id,
+        version=model.version,
+        markdown=model.markdown,
+        content_digest=model.content_digest,
+        change_source=model.change_source,
+        created_by=model.created_by,
+        created_at=utc_aware(model.created_at),
+    )
+
+
+def daily_snapshot_from_model(model: DailyIntelligenceSnapshotModel) -> DailyIntelligenceSnapshot:
+    return DailyIntelligenceSnapshot(
+        id=model.id,
+        workspace_id=model.workspace_id,
+        covered_date=model.covered_date,
+        timezone=model.timezone,
+        structured_data_json=model.structured_data_json,
+        content_digest=model.content_digest,
+        status=SnapshotStatus(model.status),
+        approved_by=model.approved_by,
+        approved_at=utc_aware(model.approved_at) if model.approved_at else None,
+        created_at=utc_aware(model.created_at),
+    )
+
+
+class SqlAlchemyReportStore:
+    def __init__(self, engine: Engine) -> None:
+        self.engine = engine
+
+    def create(
+        self,
+        report: Report,
+        version: ReportVersion,
+        snapshot: DailyIntelligenceSnapshot | None,
+    ) -> Report:
+        with Session(self.engine) as session:
+            if snapshot:
+                session.add(self._snapshot_model(snapshot))
+            session.add(self._report_model(report))
+            session.add(self._version_model(version))
+            try:
+                session.commit()
+            except IntegrityError as exc:
+                session.rollback()
+                if snapshot and self.get_daily_snapshot(snapshot.workspace_id, snapshot.covered_date):
+                    raise DuplicateDailyReportError(
+                        "该日期已存在日报。"
+                    ) from exc
+                raise
+        return report
+
+    def list(self, workspace_id: str) -> list[Report]:
+        with Session(self.engine) as session:
+            models = session.scalars(
+                select(ReportModel)
+                .where(ReportModel.workspace_id == workspace_id)
+                .order_by(ReportModel.period_start.desc(), ReportModel.created_at.desc())
+            ).all()
+        return [report_from_model(model) for model in models]
+
+    def get(self, workspace_id: str, report_id: str) -> Report | None:
+        with Session(self.engine) as session:
+            model = session.scalar(
+                select(ReportModel).where(
+                    ReportModel.workspace_id == workspace_id,
+                    ReportModel.id == report_id,
+                )
+            )
+        return report_from_model(model) if model else None
+
+    def get_version(self, version_id: str) -> ReportVersion | None:
+        with Session(self.engine) as session:
+            model = session.get(ReportVersionModel, version_id)
+        return report_version_from_model(model) if model else None
+
+    def save_version(self, report: Report, version: ReportVersion) -> Report:
+        with Session(self.engine) as session:
+            model = session.get(ReportModel, report.id)
+            if model is None:
+                raise LookupError("Report was not found.")
+            model.current_version_id = report.current_version_id
+            model.updated_at = utc_naive(report.updated_at)
+            session.add(self._version_model(version))
+            session.commit()
+        return report
+
+    def approve(
+        self,
+        report: Report,
+        snapshot: DailyIntelligenceSnapshot | None,
+    ) -> Report:
+        with Session(self.engine) as session:
+            model = session.get(ReportModel, report.id)
+            if model is None:
+                raise LookupError("Report was not found.")
+            model.status = report.status.value
+            model.approved_by = report.approved_by
+            model.approved_at = utc_naive(report.approved_at) if report.approved_at else None
+            model.updated_at = utc_naive(report.updated_at)
+            if snapshot:
+                snapshot_model = session.get(DailyIntelligenceSnapshotModel, snapshot.id)
+                if snapshot_model is None:
+                    raise LookupError("Daily snapshot was not found.")
+                snapshot_model.status = snapshot.status.value
+                snapshot_model.approved_by = snapshot.approved_by
+                snapshot_model.approved_at = (
+                    utc_naive(snapshot.approved_at) if snapshot.approved_at else None
+                )
+            session.commit()
+        return report
+
+    def get_daily_snapshot(
+        self,
+        workspace_id: str,
+        covered_date: date,
+    ) -> DailyIntelligenceSnapshot | None:
+        with Session(self.engine) as session:
+            model = session.scalar(
+                select(DailyIntelligenceSnapshotModel).where(
+                    DailyIntelligenceSnapshotModel.workspace_id == workspace_id,
+                    DailyIntelligenceSnapshotModel.covered_date == covered_date,
+                )
+            )
+        return daily_snapshot_from_model(model) if model else None
+
+    def list_daily_snapshots(
+        self,
+        workspace_id: str,
+        start: date,
+        end: date,
+    ) -> list[DailyIntelligenceSnapshot]:
+        with Session(self.engine) as session:
+            models = session.scalars(
+                select(DailyIntelligenceSnapshotModel)
+                .where(
+                    DailyIntelligenceSnapshotModel.workspace_id == workspace_id,
+                    DailyIntelligenceSnapshotModel.covered_date >= start,
+                    DailyIntelligenceSnapshotModel.covered_date <= end,
+                )
+                .order_by(DailyIntelligenceSnapshotModel.covered_date)
+            ).all()
+        return [daily_snapshot_from_model(model) for model in models]
+
+    @staticmethod
+    def _report_model(item: Report) -> ReportModel:
+        return ReportModel(
+            id=item.id,
+            workspace_id=item.workspace_id,
+            title=item.title,
+            report_period=item.report_period.value,
+            input_mode=item.input_mode,
+            period_start=item.period_start,
+            period_end=item.period_end,
+            status=item.status.value,
+            current_version_id=item.current_version_id,
+            input_snapshot_ids_json=json.dumps(item.input_snapshot_ids),
+            input_snapshot_dates_json=json.dumps([value.isoformat() for value in item.input_snapshot_dates]),
+            approved_by=item.approved_by,
+            approved_at=utc_naive(item.approved_at) if item.approved_at else None,
+            created_at=utc_naive(item.created_at),
+            updated_at=utc_naive(item.updated_at),
+        )
+
+    @staticmethod
+    def _version_model(item: ReportVersion) -> ReportVersionModel:
+        return ReportVersionModel(
+            id=item.id,
+            report_id=item.report_id,
+            version=item.version,
+            markdown=item.markdown,
+            content_digest=item.content_digest,
+            change_source=item.change_source,
+            created_by=item.created_by,
+            created_at=utc_naive(item.created_at),
+        )
+
+    @staticmethod
+    def _snapshot_model(item: DailyIntelligenceSnapshot) -> DailyIntelligenceSnapshotModel:
+        return DailyIntelligenceSnapshotModel(
+            id=item.id,
+            workspace_id=item.workspace_id,
+            covered_date=item.covered_date,
+            timezone=item.timezone,
+            structured_data_json=item.structured_data_json,
+            content_digest=item.content_digest,
+            status=item.status.value,
+            approved_by=item.approved_by,
+            approved_at=utc_naive(item.approved_at) if item.approved_at else None,
+            created_at=utc_naive(item.created_at),
         )
     DocumentModel,
     ExternalSignalModel,

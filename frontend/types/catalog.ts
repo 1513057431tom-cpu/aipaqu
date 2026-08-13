@@ -248,6 +248,32 @@ export type RecommendationDecision = {
   createdAt: string
 }
 
+export type ReportVersion = {
+  id: string
+  version: number
+  markdown: string
+  contentDigest: string
+  changeSource: "SYSTEM_DRAFT" | "MANUAL_EDIT"
+  createdBy: string
+  createdAt: string
+}
+
+export type IntelligenceReport = {
+  id: string
+  title: string
+  reportPeriod: "DAILY" | "WEEKLY" | "MONTHLY"
+  inputMode: "COLLECT_AND_ANALYZE" | "AGGREGATE_DAILY_SNAPSHOTS"
+  periodStart: string
+  periodEnd: string
+  status: "DRAFT" | "APPROVED"
+  inputSnapshotDates: string[]
+  approvedBy: string | null
+  approvedAt: string | null
+  currentVersion: ReportVersion
+  createdAt: string
+  updatedAt: string
+}
+
 export type CollectionResult = {
   job: CollectionJob
   document: EvidenceDocument | null
@@ -263,3 +289,4 @@ export type WorkspaceView =
   | "monitoring"
   | "signals"
   | "recommendations"
+  | "reports"

@@ -20,15 +20,6 @@
         {{ item.label }}
       </button>
 
-      <div class="px-3 pb-1 pt-5 text-xs font-medium text-slate-400">后续模块</div>
-      <div
-        v-for="item in futureItems"
-        :key="item.label"
-        class="flex h-9 items-center gap-3 px-3 text-sm text-slate-400"
-      >
-        <component :is="item.icon" :size="17" aria-hidden="true" />
-        {{ item.label }}
-      </div>
     </nav>
 
     <div class="border-t border-slate-200 p-3">
@@ -75,9 +66,6 @@ const activeItems = [
   { key: "monitoring" as const, label: "外部监控", icon: Radar },
   { key: "signals" as const, label: "情报信号", icon: Activity },
   { key: "recommendations" as const, label: "采购建议", icon: ClipboardCheck },
-]
-
-const futureItems = [
-  { label: "周期报告", icon: FileText },
+  { key: "reports" as const, label: "报告中心", icon: FileText },
 ]
 </script>
