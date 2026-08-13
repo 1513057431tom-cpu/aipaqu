@@ -111,6 +111,30 @@ class InMemoryCatalogStore:
             ]
         return sorted(materials, key=lambda item: (item.external_code.casefold(), item.id))
 
+    def get_material(self, workspace_id: str, material_id: str) -> Material | None:
+        with self._lock:
+            material = self._materials.get(material_id)
+            if material is None or material.workspace_id != workspace_id:
+                return None
+            return material
+
+    def get_material_by_external_code(
+        self,
+        workspace_id: str,
+        external_code: str,
+    ) -> Material | None:
+        normalized_code = external_code.casefold()
+        with self._lock:
+            return next(
+                (
+                    material
+                    for material in self._materials.values()
+                    if material.workspace_id == workspace_id
+                    and material.external_code.casefold() == normalized_code
+                ),
+                None,
+            )
+
     def create_supplier(
         self,
         *,
