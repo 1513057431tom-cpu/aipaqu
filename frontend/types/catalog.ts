@@ -204,6 +204,50 @@ export type ExternalSignal = {
   reviewedAt: string | null
 }
 
+export type RecommendationCalculation = {
+  availableQty: number
+  demandQty: number
+  openSupplyQty: number
+  safetyStockQty: number
+  consumptionDailyQty: number
+  leadTimeDays: number
+  projectedBalanceQty: number
+}
+
+export type ProcurementRecommendation = {
+  id: string
+  materialId: string
+  asOfDate: string
+  horizonEnd: string
+  recommendedOrderDate: string
+  latestOrderDate: string
+  recommendedQty: number
+  unit: string
+  riskLevel: "HIGH" | "MEDIUM" | "LOW"
+  reasonCodes: string[]
+  calculation: RecommendationCalculation
+  explanation: string
+  inputDigest: string
+  algorithm: { key: string; version: string }
+  evidenceRefs: string[]
+  externalSignalIds: string[]
+  status: "PROPOSED" | "APPROVED" | "ADJUSTED" | "REJECTED"
+  version: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type RecommendationDecision = {
+  id: string
+  recommendationId: string
+  decision: "APPROVE" | "ADJUST" | "REJECT"
+  adjustedOrderDate: string | null
+  adjustedQty: number | null
+  reason: string
+  actorId: string
+  createdAt: string
+}
+
 export type CollectionResult = {
   job: CollectionJob
   document: EvidenceDocument | null
@@ -218,3 +262,4 @@ export type WorkspaceView =
   | "imports"
   | "monitoring"
   | "signals"
+  | "recommendations"

@@ -74,10 +74,10 @@ const activeItems = [
   { key: "imports" as const, label: "数据导入", icon: Upload },
   { key: "monitoring" as const, label: "外部监控", icon: Radar },
   { key: "signals" as const, label: "情报信号", icon: Activity },
+  { key: "recommendations" as const, label: "采购建议", icon: ClipboardCheck },
 ]
 
 const futureItems = [
-  { label: "采购建议", icon: ClipboardCheck },
   { label: "周期报告", icon: FileText },
 ]
 </script>

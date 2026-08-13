@@ -8,6 +8,7 @@ from app.api.routes.catalog import router as catalog_router
 from app.api.routes.health import router as health_router
 from app.api.routes.internal_data import router as internal_data_router
 from app.api.routes.monitoring import router as monitoring_router
+from app.api.routes.recommendations import router as recommendations_router
 from app.core.config import get_settings
 
 
@@ -39,7 +40,7 @@ def create_app() -> FastAPI:
         allow_origins=settings.allowed_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type", "Idempotency-Key", "X-CSRF-Token"],
+        allow_headers=["Content-Type", "Idempotency-Key", "If-Match", "X-CSRF-Token"],
     )
     app.add_exception_handler(HTTPException, http_exception_handler)
     app.include_router(auth_router)
@@ -47,6 +48,7 @@ def create_app() -> FastAPI:
     app.include_router(catalog_router)
     app.include_router(internal_data_router)
     app.include_router(monitoring_router)
+    app.include_router(recommendations_router)
     app.include_router(health_router)
     return app
 

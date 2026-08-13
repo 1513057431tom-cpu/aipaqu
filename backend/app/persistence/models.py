@@ -235,3 +235,50 @@ class ExternalSignalModel(Base):
     reviewed_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(), nullable=True)
     content_digest: Mapped[str] = mapped_column(String(64))
+
+
+class ProcurementRecommendationModel(Base):
+    __tablename__ = "procurement_recommendations"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "material_id", "input_digest"),
+        Index("ix_recommendations_workspace_status_risk", "workspace_id", "status", "risk_level"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(64))
+    material_id: Mapped[str] = mapped_column(ForeignKey("materials.id"))
+    as_of_date: Mapped[date] = mapped_column(Date())
+    horizon_end: Mapped[date] = mapped_column(Date())
+    recommended_order_date: Mapped[date] = mapped_column(Date())
+    latest_order_date: Mapped[date] = mapped_column(Date())
+    recommended_qty: Mapped[float] = mapped_column(Float)
+    unit: Mapped[str] = mapped_column(String(32))
+    risk_level: Mapped[str] = mapped_column(String(16))
+    reason_codes_json: Mapped[str] = mapped_column(Text)
+    calculation_json: Mapped[str] = mapped_column(Text)
+    explanation: Mapped[str] = mapped_column(Text)
+    input_digest: Mapped[str] = mapped_column(String(80))
+    algorithm_key: Mapped[str] = mapped_column(String(80))
+    algorithm_version: Mapped[str] = mapped_column(String(32))
+    evidence_refs_json: Mapped[str] = mapped_column(Text)
+    external_signal_ids_json: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(32))
+    version: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime())
+    updated_at: Mapped[datetime] = mapped_column(DateTime())
+
+
+class RecommendationDecisionModel(Base):
+    __tablename__ = "recommendation_decisions"
+    __table_args__ = (
+        Index("ix_recommendation_decisions_recommendation_created", "recommendation_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    recommendation_id: Mapped[str] = mapped_column(ForeignKey("procurement_recommendations.id"))
+    decision: Mapped[str] = mapped_column(String(16))
+    adjusted_order_date: Mapped[date | None] = mapped_column(Date(), nullable=True)
+    adjusted_qty: Mapped[float | None] = mapped_column(Float, nullable=True)
+    reason: Mapped[str] = mapped_column(String(500))
+    actor_id: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime())

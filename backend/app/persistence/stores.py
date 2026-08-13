@@ -6,7 +6,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -38,6 +38,15 @@ from app.core.monitoring import (
     Source,
     SourceStatus,
 )
+from app.core.recommendations import (
+    DecisionType,
+    ProcurementRecommendation,
+    RecommendationCalculation,
+    RecommendationDecision,
+    RecommendationStatus,
+    RecommendationVersionConflictError,
+    RiskLevel,
+)
 from app.persistence.models import (
     CollectionJobModel,
     ConsumptionSnapshotModel,
@@ -48,6 +57,8 @@ from app.persistence.models import (
     MaterialDemandModel,
     MaterialModel,
     OpenSupplySnapshotModel,
+    ProcurementRecommendationModel,
+    RecommendationDecisionModel,
     SourceModel,
     SupplierModel,
 )
@@ -680,6 +691,169 @@ class SqlAlchemyMonitoringStore:
             reviewed_by=item.reviewed_by,
             reviewed_at=utc_naive(item.reviewed_at) if item.reviewed_at else None,
             content_digest=item.content_digest,
+        )
+
+
+def recommendation_from_model(model: ProcurementRecommendationModel) -> ProcurementRecommendation:
+    calculation = json.loads(model.calculation_json)
+    return ProcurementRecommendation(
+        id=model.id,
+        workspace_id=model.workspace_id,
+        material_id=model.material_id,
+        as_of_date=model.as_of_date,
+        horizon_end=model.horizon_end,
+        recommended_order_date=model.recommended_order_date,
+        latest_order_date=model.latest_order_date,
+        recommended_qty=model.recommended_qty,
+        unit=model.unit,
+        risk_level=RiskLevel(model.risk_level),
+        reason_codes=tuple(json.loads(model.reason_codes_json)),
+        calculation=RecommendationCalculation(**calculation),
+        explanation=model.explanation,
+        input_digest=model.input_digest,
+        algorithm_key=model.algorithm_key,
+        algorithm_version=model.algorithm_version,
+        evidence_refs=tuple(json.loads(model.evidence_refs_json)),
+        external_signal_ids=tuple(json.loads(model.external_signal_ids_json)),
+        status=RecommendationStatus(model.status),
+        version=model.version,
+        created_at=utc_aware(model.created_at),
+        updated_at=utc_aware(model.updated_at),
+    )
+
+
+def decision_from_model(model: RecommendationDecisionModel) -> RecommendationDecision:
+    return RecommendationDecision(
+        id=model.id,
+        recommendation_id=model.recommendation_id,
+        decision=DecisionType(model.decision),
+        adjusted_order_date=model.adjusted_order_date,
+        adjusted_qty=model.adjusted_qty,
+        reason=model.reason,
+        actor_id=model.actor_id,
+        created_at=utc_aware(model.created_at),
+    )
+
+
+class SqlAlchemyRecommendationStore:
+    def __init__(self, engine: Engine) -> None:
+        self.engine = engine
+
+    def find_by_digest(self, workspace_id: str, material_id: str, input_digest: str) -> ProcurementRecommendation | None:
+        with Session(self.engine) as session:
+            model = session.scalar(
+                select(ProcurementRecommendationModel).where(
+                    ProcurementRecommendationModel.workspace_id == workspace_id,
+                    ProcurementRecommendationModel.material_id == material_id,
+                    ProcurementRecommendationModel.input_digest == input_digest,
+                )
+            )
+        return recommendation_from_model(model) if model else None
+
+    def save(self, recommendation: ProcurementRecommendation) -> ProcurementRecommendation:
+        with Session(self.engine) as session:
+            session.add(self._model(recommendation))
+            try:
+                session.commit()
+            except IntegrityError:
+                session.rollback()
+                existing = self.find_by_digest(
+                    recommendation.workspace_id,
+                    recommendation.material_id,
+                    recommendation.input_digest,
+                )
+                if existing is None:
+                    raise
+                return existing
+        return recommendation
+
+    def list(self, workspace_id: str) -> list[ProcurementRecommendation]:
+        with Session(self.engine) as session:
+            models = session.scalars(
+                select(ProcurementRecommendationModel)
+                .where(ProcurementRecommendationModel.workspace_id == workspace_id)
+                .order_by(
+                    ProcurementRecommendationModel.latest_order_date,
+                    ProcurementRecommendationModel.created_at.desc(),
+                )
+            ).all()
+        return [recommendation_from_model(model) for model in models]
+
+    def get(self, workspace_id: str, recommendation_id: str) -> ProcurementRecommendation | None:
+        with Session(self.engine) as session:
+            model = session.scalar(
+                select(ProcurementRecommendationModel).where(
+                    ProcurementRecommendationModel.workspace_id == workspace_id,
+                    ProcurementRecommendationModel.id == recommendation_id,
+                )
+            )
+        return recommendation_from_model(model) if model else None
+
+    def list_decisions(self, recommendation_id: str) -> list[RecommendationDecision]:
+        with Session(self.engine) as session:
+            models = session.scalars(
+                select(RecommendationDecisionModel)
+                .where(RecommendationDecisionModel.recommendation_id == recommendation_id)
+                .order_by(RecommendationDecisionModel.created_at, RecommendationDecisionModel.id)
+            ).all()
+        return [decision_from_model(model) for model in models]
+
+    def decide(self, recommendation: ProcurementRecommendation, decision: RecommendationDecision, expected_version: int) -> ProcurementRecommendation:
+        with Session(self.engine) as session:
+            result = session.execute(
+                update(ProcurementRecommendationModel)
+                .where(
+                    ProcurementRecommendationModel.workspace_id == recommendation.workspace_id,
+                    ProcurementRecommendationModel.id == recommendation.id,
+                    ProcurementRecommendationModel.version == expected_version,
+                )
+                .values(
+                    status=recommendation.status.value,
+                    version=recommendation.version,
+                    updated_at=utc_naive(recommendation.updated_at),
+                )
+            )
+            if result.rowcount != 1:
+                session.rollback()
+                raise RecommendationVersionConflictError("Recommendation version has changed.")
+            session.add(RecommendationDecisionModel(
+                id=decision.id,
+                recommendation_id=decision.recommendation_id,
+                decision=decision.decision.value,
+                adjusted_order_date=decision.adjusted_order_date,
+                adjusted_qty=decision.adjusted_qty,
+                reason=decision.reason,
+                actor_id=decision.actor_id,
+                created_at=utc_naive(decision.created_at),
+            ))
+            session.commit()
+        return recommendation
+
+    @staticmethod
+    def _model(item: ProcurementRecommendation) -> ProcurementRecommendationModel:
+        return ProcurementRecommendationModel(
+            id=item.id,
+            workspace_id=item.workspace_id,
+            material_id=item.material_id,
+            as_of_date=item.as_of_date,
+            horizon_end=item.horizon_end,
+            recommended_order_date=item.recommended_order_date,
+            latest_order_date=item.latest_order_date,
+            recommended_qty=item.recommended_qty,
+            unit=item.unit,
+            risk_level=item.risk_level.value,
+            reason_codes_json=json.dumps(item.reason_codes),
+            calculation_json=json.dumps(asdict(item.calculation)),
+            explanation=item.explanation,
+            input_digest=item.input_digest,
+            algorithm_key=item.algorithm_key,
+            algorithm_version=item.algorithm_version,
+            evidence_refs_json=json.dumps(item.evidence_refs),
+            external_signal_ids_json=json.dumps(item.external_signal_ids),
+            status=item.status.value,
+            version=item.version,
+            created_at=utc_naive(item.created_at),
+            updated_at=utc_naive(item.updated_at),
         )
     DocumentModel,
     ExternalSignalModel,
