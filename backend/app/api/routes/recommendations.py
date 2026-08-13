@@ -17,6 +17,7 @@ from app.core.recommendations import (
     RecommendationVersionConflictError,
 )
 from app.core.stores import (
+    agent_service,
     catalog_store,
     internal_data_store,
     monitoring_store,
@@ -130,6 +131,7 @@ def get_planning_engine() -> PlanningEngine:
         internal_data_store,
         monitoring_store,
         recommendation_store,
+        agent_service,
     )
 
 

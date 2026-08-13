@@ -183,8 +183,11 @@ class SourceModel(Base):
     schedule_minutes: Mapped[int] = mapped_column(Integer)
     signal_type: Mapped[str] = mapped_column(String(32))
     material_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    material_group_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     supplier_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     extraction_selector: Mapped[str] = mapped_column(String(200))
+    collection_mode: Mapped[str] = mapped_column(String(32), default="HTTP")
+    navigation_goal: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(32))
     last_collected_at: Mapped[datetime | None] = mapped_column(DateTime(), nullable=True)
     last_collection_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
@@ -259,6 +262,10 @@ class ExternalSignalModel(Base):
     reviewed_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(), nullable=True)
     content_digest: Mapped[str] = mapped_column(String(64))
+    summary: Mapped[str] = mapped_column(Text, default="")
+    analysis_rationale: Mapped[str] = mapped_column(Text, default="")
+    analysis_model: Mapped[str] = mapped_column(String(100), default="")
+    ai_analyzed: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class ProcurementRecommendationModel(Base):
@@ -409,4 +416,16 @@ class AgentConfigurationModel(Base):
     system_prompt: Mapped[str] = mapped_column(Text)
     default_execution_mode: Mapped[str] = mapped_column(String(16))
     tool_keys_json: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime())
+
+
+class ReportTemplateModel(Base):
+    __tablename__ = "report_templates"
+    __table_args__ = (UniqueConstraint("workspace_id", "period"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
+    period: Mapped[str] = mapped_column(String(16))
+    name: Mapped[str] = mapped_column(String(120))
+    content: Mapped[str] = mapped_column(Text().with_variant(mysql.LONGTEXT(), "mysql"))
     updated_at: Mapped[datetime] = mapped_column(DateTime())

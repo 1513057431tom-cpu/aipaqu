@@ -32,6 +32,7 @@ from app.core.internal_data import (
 from app.core.monitoring import (
     CollectionJob,
     CollectionStatus,
+    CollectionMode,
     Document,
     DuplicateSourceUrlError,
     ExternalSignal,
@@ -534,8 +535,11 @@ def source_from_model(model: SourceModel) -> Source:
         schedule_minutes=model.schedule_minutes,
         signal_type=SignalType(model.signal_type),
         material_id=model.material_id,
+        material_group_id=model.material_group_id,
         supplier_id=model.supplier_id,
         extraction_selector=model.extraction_selector,
+        collection_mode=CollectionMode(model.collection_mode),
+        navigation_goal=model.navigation_goal,
         status=SourceStatus(model.status),
         last_collected_at=utc_aware(model.last_collected_at) if model.last_collected_at else None,
         last_collection_status=(
@@ -603,6 +607,10 @@ def signal_from_model(model: ExternalSignalModel) -> ExternalSignal:
         reviewed_by=model.reviewed_by,
         reviewed_at=utc_aware(model.reviewed_at) if model.reviewed_at else None,
         content_digest=model.content_digest,
+        summary=model.summary,
+        analysis_rationale=model.analysis_rationale,
+        analysis_model=model.analysis_model,
+        ai_analyzed=bool(model.ai_analyzed),
     )
 
 
@@ -613,6 +621,17 @@ class SqlAlchemyMonitoringStore:
     def create_source(self, source: Source) -> Source:
         with Session(self.engine) as session:
             session.add(self._source_model(source))
+            try:
+                session.commit()
+            except IntegrityError as exc:
+                raise DuplicateSourceUrlError(
+                    "Source URL already exists in this workspace."
+                ) from exc
+        return source
+
+    def update_source(self, source: Source) -> Source:
+        with Session(self.engine) as session:
+            session.merge(self._source_model(source))
             try:
                 session.commit()
             except IntegrityError as exc:
@@ -640,7 +659,10 @@ class SqlAlchemyMonitoringStore:
         with Session(self.engine) as session:
             models = session.scalars(
                 select(SourceModel)
-                .where(SourceModel.workspace_id == workspace_id)
+                .where(
+                    SourceModel.workspace_id == workspace_id,
+                    SourceModel.status != SourceStatus.ARCHIVED.value,
+                )
                 .order_by(SourceModel.name, SourceModel.id)
             ).all()
         return [source_from_model(model) for model in models]
@@ -757,8 +779,11 @@ class SqlAlchemyMonitoringStore:
             schedule_minutes=item.schedule_minutes,
             signal_type=item.signal_type.value,
             material_id=item.material_id,
+            material_group_id=item.material_group_id,
             supplier_id=item.supplier_id,
             extraction_selector=item.extraction_selector,
+            collection_mode=item.collection_mode.value,
+            navigation_goal=item.navigation_goal,
             status=item.status.value,
             last_collected_at=utc_naive(item.last_collected_at) if item.last_collected_at else None,
             last_collection_status=(
@@ -824,6 +849,10 @@ class SqlAlchemyMonitoringStore:
             reviewed_by=item.reviewed_by,
             reviewed_at=utc_naive(item.reviewed_at) if item.reviewed_at else None,
             content_digest=item.content_digest,
+            summary=item.summary,
+            analysis_rationale=item.analysis_rationale,
+            analysis_model=item.analysis_model,
+            ai_analyzed=int(item.ai_analyzed),
         )
 
 

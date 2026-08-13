@@ -20,6 +20,12 @@ from uuid import uuid4
 class SourceStatus(str, Enum):
     ACTIVE = "ACTIVE"
     PAUSED = "PAUSED"
+    ARCHIVED = "ARCHIVED"
+
+
+class CollectionMode(str, Enum):
+    HTTP = "HTTP"
+    AI_BROWSER = "AI_BROWSER"
 
 
 class SignalType(str, Enum):
@@ -46,6 +52,18 @@ class DuplicateSourceUrlError(ValueError):
     pass
 
 
+class BrowserRuntimeUnavailableError(RuntimeError):
+    pass
+
+
+class AccessChallengeError(RuntimeError):
+    pass
+
+
+class BrowserCollectionError(RuntimeError):
+    pass
+
+
 @dataclass(frozen=True)
 class Source:
     id: str
@@ -64,6 +82,9 @@ class Source:
     last_content_digest: str | None
     created_at: datetime
     updated_at: datetime
+    material_group_id: str | None = None
+    collection_mode: CollectionMode = CollectionMode.HTTP
+    navigation_goal: str = ""
 
 
 @dataclass(frozen=True)
@@ -118,6 +139,10 @@ class ExternalSignal:
     reviewed_by: str | None
     reviewed_at: datetime | None
     content_digest: str
+    summary: str = ""
+    analysis_rationale: str = ""
+    analysis_model: str = ""
+    ai_analyzed: bool = False
 
 
 @dataclass(frozen=True)
@@ -139,9 +164,32 @@ class Fetcher(Protocol):
     def fetch(self, url: str, allowed_domain: str) -> FetchResult: ...
 
 
+class BrowserFetcher(Protocol):
+    def fetch(self, source: Source) -> FetchResult: ...
+
+
+@dataclass(frozen=True)
+class SignalAnalysis:
+    relevant: bool
+    summary: str
+    previous_value: str
+    current_value: str
+    confidence: float
+    rationale: str
+    material_id: str | None
+    model: str
+
+
+class SignalAnalyzer(Protocol):
+    def analyze(
+        self, source: Source, document: Document, previous: Document
+    ) -> SignalAnalysis: ...
+
+
 class MonitoringStore(Protocol):
     def all_sources(self) -> list[Source]: ...
     def create_source(self, source: Source) -> Source: ...
+    def update_source(self, source: Source) -> Source: ...
     def get_source(self, workspace_id: str, source_id: str) -> Source | None: ...
     def list_sources(self, workspace_id: str) -> list[Source]: ...
     def get_latest_document(self, workspace_id: str, source_id: str) -> Document | None: ...
@@ -358,13 +406,30 @@ class InMemoryMonitoringStore:
             self._sources[source.id] = source
         return source
 
+    def update_source(self, source: Source) -> Source:
+        with self._lock:
+            if source.id not in self._sources:
+                raise LookupError("Source was not found.")
+            if any(
+                item.id != source.id
+                and item.workspace_id == source.workspace_id
+                and item.target_url == source.target_url
+                for item in self._sources.values()
+            ):
+                raise DuplicateSourceUrlError("Source URL already exists in this workspace.")
+            self._sources[source.id] = source
+        return source
+
     def get_source(self, workspace_id: str, source_id: str) -> Source | None:
         source = self._sources.get(source_id)
         return source if source and source.workspace_id == workspace_id else None
 
     def list_sources(self, workspace_id: str) -> list[Source]:
         return sorted(
-            (item for item in self._sources.values() if item.workspace_id == workspace_id),
+            (
+                item for item in self._sources.values()
+                if item.workspace_id == workspace_id and item.status != SourceStatus.ARCHIVED
+            ),
             key=lambda item: (item.name.casefold(), item.id),
         )
 
@@ -411,9 +476,18 @@ class InMemoryMonitoringStore:
 
 
 class MonitoringService:
-    def __init__(self, store: MonitoringStore, fetcher: Fetcher | None = None) -> None:
+    def __init__(
+        self,
+        store: MonitoringStore,
+        fetcher: Fetcher | None = None,
+        *,
+        browser_fetcher: BrowserFetcher | None = None,
+        signal_analyzer: SignalAnalyzer | None = None,
+    ) -> None:
         self.store = store
         self.fetcher = fetcher or SafeHttpFetcher()
+        self.browser_fetcher = browser_fetcher
+        self.signal_analyzer = signal_analyzer
 
     def collect(self, workspace_id: str, source_id: str) -> CollectionResult:
         source = self.store.get_source(workspace_id, source_id)
@@ -422,7 +496,20 @@ class MonitoringService:
         started_at = datetime.now(timezone.utc)
         job_id = f"collect_{uuid4().hex}"
         try:
-            fetched = self.fetcher.fetch(source.target_url, source.allowed_domain)
+            if source.collection_mode == CollectionMode.AI_BROWSER:
+                if self.browser_fetcher is None:
+                    return self._save_failure(
+                        source,
+                        job_id,
+                        started_at,
+                        CollectionStatus.WAITING_HUMAN,
+                        None,
+                        "BROWSER_RUNTIME_UNAVAILABLE",
+                        "Intelligent browser collection is not configured.",
+                    )
+                fetched = self.browser_fetcher.fetch(source)
+            else:
+                fetched = self.fetcher.fetch(source.target_url, source.allowed_domain)
             if fetched.status_code in {401, 403, 407, 429} or b"captcha" in fetched.body.lower():
                 return self._save_failure(
                     source,
@@ -469,7 +556,15 @@ class MonitoringService:
                 changed=changed,
                 collected_at=now,
             )
-            signal = self._build_signal(source, document, previous) if changed else None
+            signal = None
+            if changed and previous is not None:
+                analysis = (
+                    self.signal_analyzer.analyze(source, document, previous)
+                    if self.signal_analyzer is not None
+                    else None
+                )
+                if analysis is None or analysis.relevant:
+                    signal = self._build_signal(source, document, previous, analysis)
             job = CollectionJob(
                 id=job_id,
                 workspace_id=workspace_id,
@@ -492,7 +587,29 @@ class MonitoringService:
             )
             self.store.save_collection(updated_source, job, document, signal)
             return CollectionResult(job=job, document=document, signal=signal)
-        except (http.client.HTTPException, OSError, ssl.SSLError, ValueError) as exc:
+        except Exception as exc:
+            if isinstance(exc, (AccessChallengeError, BrowserRuntimeUnavailableError)):
+                return self._save_failure(
+                    source,
+                    job_id,
+                    started_at,
+                    CollectionStatus.WAITING_HUMAN,
+                    None,
+                    type(exc).__name__.replace("Error", "").upper(),
+                    str(exc),
+                )
+            if isinstance(exc, BrowserCollectionError):
+                return self._save_failure(
+                    source,
+                    job_id,
+                    started_at,
+                    CollectionStatus.FAILED,
+                    None,
+                    "INTELLIGENT_COLLECTION_FAILED",
+                    str(exc),
+                )
+            if not isinstance(exc, (http.client.HTTPException, OSError, ssl.SSLError, ValueError)):
+                raise
             return self._save_failure(
                 source,
                 job_id,
@@ -545,27 +662,43 @@ class MonitoringService:
         return CollectionResult(job=job, document=None, signal=None)
 
     @staticmethod
-    def _build_signal(source: Source, document: Document, previous: Document | None) -> ExternalSignal:
-        binding_key = f"MATERIAL:{source.material_id}" if source.material_id else f"SUPPLIER:{source.supplier_id}"
+    def _build_signal(
+        source: Source,
+        document: Document,
+        previous: Document,
+        analysis: SignalAnalysis | None,
+    ) -> ExternalSignal:
+        material_id = analysis.material_id if analysis else source.material_id
+        binding_key = (
+            f"MATERIAL:{material_id}"
+            if material_id
+            else f"MATERIAL_GROUP:{source.material_group_id}"
+            if source.material_group_id
+            else f"SUPPLIER:{source.supplier_id}"
+        )
         return ExternalSignal(
             id=f"sig_{uuid4().hex}",
             workspace_id=source.workspace_id,
             source_id=source.id,
             document_id=document.id,
             signal_type=source.signal_type,
-            material_id=source.material_id,
+            material_id=material_id,
             supplier_id=source.supplier_id,
             binding_key=binding_key,
             occurred_at=document.collected_at,
             observed_at=document.collected_at,
-            previous_value=(previous.extracted_text if previous else "")[:10_000],
-            current_value=document.extracted_text[:10_000],
-            confidence=1.0,
+            previous_value=(analysis.previous_value if analysis else previous.extracted_text)[:10_000],
+            current_value=(analysis.current_value if analysis else document.extracted_text)[:10_000],
+            confidence=analysis.confidence if analysis else 1.0,
             evidence_ref=f"/api/v1/documents/{document.id}",
             review_status=ReviewStatus.PENDING,
             reviewed_by=None,
             reviewed_at=None,
             content_digest=document.content_digest,
+            summary=analysis.summary if analysis else "检测到监控内容变化，等待人工确认。",
+            analysis_rationale=analysis.rationale if analysis else "基于内容摘要差异生成。",
+            analysis_model=analysis.model if analysis else "",
+            ai_analyzed=analysis is not None,
         )
 
 

@@ -3,7 +3,14 @@ from dataclasses import dataclass
 from fastapi.testclient import TestClient
 
 from app.api.routes.monitoring import get_monitoring_service
-from app.core.monitoring import FetchResult, MonitoringService, run_due_collections, validate_public_url
+from app.core.monitoring import (
+    CollectionMode,
+    FetchResult,
+    MonitoringService,
+    SignalAnalysis,
+    run_due_collections,
+    validate_public_url,
+)
 from app.core.stores import monitoring_store
 from app.main import create_app
 
@@ -39,6 +46,31 @@ class SequenceFetcher:
 
     def fetch(self, _url: str, _allowed_domain: str) -> FetchResult:
         return self.results.pop(0)
+
+
+@dataclass
+class SourceBrowserFetcher:
+    results: list[FetchResult]
+
+    def fetch(self, _source) -> FetchResult:
+        return self.results.pop(0)
+
+
+@dataclass
+class FixedSignalAnalyzer:
+    material_id: str
+
+    def analyze(self, _source, _document, _previous) -> SignalAnalysis:
+        return SignalAnalysis(
+            relevant=True,
+            summary="酸枣仁公开报价由每公斤 100 元调整为 115 元。",
+            previous_value="100 元/公斤",
+            current_value="115 元/公斤",
+            confidence=0.93,
+            rationale="新旧证据均明确包含物料名、单位和报价。",
+            material_id=self.material_id,
+            model="deepseek-chat",
+        )
 
 
 def test_public_url_validation_blocks_private_and_mismatched_hosts() -> None:
@@ -235,3 +267,109 @@ def test_due_collection_batch_runs_only_sources_past_their_schedule() -> None:
     results = run_due_collections(store, fetcher=fetcher, now=now)
 
     assert [result.job.source_id for result in results] == ["due"]
+
+
+def test_material_group_source_can_be_edited_and_archived() -> None:
+    client = TestClient(create_app())
+    login(client)
+    group = client.post(
+        "/api/v1/material-groups",
+        json={"code": "RAW", "name": "原料组", "parentId": None, "sortOrder": 1},
+    )
+    assert group.status_code == 201
+    payload = {
+        "name": "原料行情",
+        "targetUrl": "https://example.com/materials",
+        "allowedDomain": "example.com",
+        "scheduleMinutes": 60,
+        "signalType": "PRICE",
+        "materialGroupId": group.json()["id"],
+        "collectionMode": "AI_BROWSER",
+        "navigationGoal": "搜索组内物料并读取价格标签",
+    }
+
+    created = client.post("/api/v1/sources", json=payload)
+    assert created.status_code == 201
+    assert created.json()["materialGroupId"] == group.json()["id"]
+    assert created.json()["collectionMode"] == "AI_BROWSER"
+
+    updated = client.patch(
+        f"/api/v1/sources/{created.json()['id']}",
+        json={**payload, "name": "原料价格监控", "status": "PAUSED"},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["name"] == "原料价格监控"
+    assert updated.json()["status"] == "PAUSED"
+
+    archived = client.delete(f"/api/v1/sources/{created.json()['id']}")
+    assert archived.status_code == 204
+    assert all(
+        item["id"] != created.json()["id"]
+        for item in client.get("/api/v1/sources").json()["data"]
+    )
+
+
+def test_ai_browser_collection_persists_structured_signal_and_filter() -> None:
+    app = create_app()
+    client = TestClient(app)
+    login(client)
+    material_id = create_material(client, "MONITOR-AI-001")
+    service = MonitoringService(
+        monitoring_store,
+        browser_fetcher=SourceBrowserFetcher(
+            [
+                FetchResult(
+                    final_url="https://example.com/search",
+                    status_code=200,
+                    content_type="text/html; charset=utf-8",
+                    body=b"<html><body><main>Material price: 100</main></body></html>",
+                ),
+                FetchResult(
+                    final_url="https://example.com/search",
+                    status_code=200,
+                    content_type="text/html; charset=utf-8",
+                    body=b"<html><body><main>Material price: 115</main></body></html>",
+                ),
+            ]
+        ),
+        signal_analyzer=FixedSignalAnalyzer(material_id),
+    )
+    app.dependency_overrides[get_monitoring_service] = lambda: service
+    source = client.post(
+        "/api/v1/sources",
+        json={
+            "name": "AI price search",
+            "targetUrl": "https://example.com/search",
+            "allowedDomain": "example.com",
+            "scheduleMinutes": 60,
+            "signalType": "PRICE",
+            "materialId": material_id,
+            "collectionMode": CollectionMode.AI_BROWSER.value,
+            "navigationGoal": "搜索物料价格",
+            "extractionSelector": "main",
+        },
+    )
+    assert source.status_code == 201
+
+    client.post(f"/api/v1/sources/{source.json()['id']}/collect")
+    changed = client.post(f"/api/v1/sources/{source.json()['id']}/collect")
+    signal = changed.json()["signal"]
+
+    assert signal["aiAnalyzed"] is True
+    assert signal["summary"].startswith("酸枣仁")
+    assert signal["confidence"] == 0.93
+    assert signal["analysisModel"] == "deepseek-chat"
+    signal_query = {
+        "sourceId": source.json()["id"],
+        "reviewStatus": "CONFIRMED",
+    }
+    assert client.get(
+        "/api/v1/external-signals", params=signal_query
+    ).json()["pagination"]["totalItems"] == 0
+    client.patch(
+        f"/api/v1/external-signals/{signal['id']}",
+        json={"reviewStatus": "CONFIRMED"},
+    )
+    assert client.get(
+        "/api/v1/external-signals", params=signal_query
+    ).json()["pagination"]["totalItems"] == 1

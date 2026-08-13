@@ -3,13 +3,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import BaseModel, Field, HttpUrl, model_validator
 
 from app.core.auth import User, get_current_user
 from app.core.errors import api_error
 from app.core.monitoring import (
     CollectionJob,
+    CollectionMode,
     CollectionResult,
     Document,
     DuplicateSourceUrlError,
@@ -21,7 +22,8 @@ from app.core.monitoring import (
     SourceStatus,
     validate_public_url,
 )
-from app.core.stores import catalog_store, monitoring_store
+from app.core.browser_collection import CloakBrowserFetcher, LangChainSignalAnalyzer
+from app.core.stores import agent_service, catalog_store, monitoring_store
 
 router = APIRouter(prefix="/api/v1", tags=["monitoring"])
 
@@ -40,14 +42,21 @@ class CreateSourceRequest(BaseModel):
     scheduleMinutes: int = Field(ge=15, le=43_200)
     signalType: SignalType
     materialId: str | None = None
+    materialGroupId: str | None = None
     supplierId: str | None = None
     extractionSelector: str = Field(default="body", max_length=200)
+    collectionMode: CollectionMode = CollectionMode.HTTP
+    navigationGoal: str = Field(default="", max_length=2000)
 
     @model_validator(mode="after")
     def require_one_binding(self) -> "CreateSourceRequest":
-        if bool(self.materialId) == bool(self.supplierId):
-            raise ValueError("Exactly one of materialId or supplierId is required.")
+        if sum(bool(value) for value in (self.materialId, self.materialGroupId, self.supplierId)) != 1:
+            raise ValueError("Exactly one material group, material, or legacy supplier binding is required.")
         return self
+
+
+class UpdateSourceRequest(CreateSourceRequest):
+    status: SourceStatus = SourceStatus.ACTIVE
 
 
 class SourceResponse(BaseModel):
@@ -58,8 +67,11 @@ class SourceResponse(BaseModel):
     scheduleMinutes: int
     signalType: SignalType
     materialId: str | None
+    materialGroupId: str | None
     supplierId: str | None
     extractionSelector: str
+    collectionMode: CollectionMode
+    navigationGoal: str
     status: str
     lastCollectedAt: datetime | None
     lastCollectionStatus: str | None
@@ -121,6 +133,10 @@ class ExternalSignalResponse(BaseModel):
     reviewStatus: str
     reviewedBy: str | None
     reviewedAt: datetime | None
+    summary: str
+    analysisRationale: str
+    analysisModel: str
+    aiAnalyzed: bool
 
 
 class ExternalSignalListResponse(BaseModel):
@@ -145,7 +161,11 @@ class CollectionResultResponse(BaseModel):
 
 
 def get_monitoring_service() -> MonitoringService:
-    return MonitoringService(monitoring_store)
+    return MonitoringService(
+        monitoring_store,
+        browser_fetcher=CloakBrowserFetcher(agent_service, catalog_store),
+        signal_analyzer=LangChainSignalAnalyzer(agent_service, catalog_store),
+    )
 
 
 def pagination(page: int, page_size: int, total: int) -> Pagination:
@@ -171,8 +191,11 @@ def source_response(item: Source) -> SourceResponse:
         scheduleMinutes=item.schedule_minutes,
         signalType=item.signal_type,
         materialId=item.material_id,
+        materialGroupId=item.material_group_id,
         supplierId=item.supplier_id,
         extractionSelector=item.extraction_selector,
+        collectionMode=item.collection_mode,
+        navigationGoal=item.navigation_goal,
         status=item.status.value,
         lastCollectedAt=item.last_collected_at,
         lastCollectionStatus=item.last_collection_status.value if item.last_collection_status else None,
@@ -230,6 +253,10 @@ def signal_response(item: ExternalSignal) -> ExternalSignalResponse:
         reviewStatus=item.review_status.value,
         reviewedBy=item.reviewed_by,
         reviewedAt=item.reviewed_at,
+        summary=item.summary,
+        analysisRationale=item.analysis_rationale,
+        analysisModel=item.analysis_model,
+        aiAnalyzed=item.ai_analyzed,
     )
 
 
@@ -241,6 +268,8 @@ def create_source(payload: CreateSourceRequest, user: User = Depends(get_current
         raise api_error(422, "SOURCE_URL_INVALID", str(exc)) from exc
     if payload.materialId and catalog_store.get_material(user.workspace_id, payload.materialId) is None:
         raise api_error(409, "MATERIAL_REFERENCE_INVALID", "Material is unavailable in this workspace.")
+    if payload.materialGroupId and catalog_store.get_material_group(user.workspace_id, payload.materialGroupId) is None:
+        raise api_error(409, "MATERIAL_GROUP_REFERENCE_INVALID", "Material group is unavailable in this workspace.")
     if payload.supplierId and not any(
         item.id == payload.supplierId
         for item in catalog_store.list_suppliers(user.workspace_id)
@@ -256,8 +285,11 @@ def create_source(payload: CreateSourceRequest, user: User = Depends(get_current
         schedule_minutes=payload.scheduleMinutes,
         signal_type=payload.signalType,
         material_id=payload.materialId,
+        material_group_id=payload.materialGroupId,
         supplier_id=payload.supplierId,
         extraction_selector=payload.extractionSelector.strip() or "body",
+        collection_mode=payload.collectionMode,
+        navigation_goal=payload.navigationGoal.strip(),
         status=SourceStatus.ACTIVE,
         last_collected_at=None,
         last_collection_status=None,
@@ -269,6 +301,67 @@ def create_source(payload: CreateSourceRequest, user: User = Depends(get_current
         return source_response(monitoring_store.create_source(source))
     except DuplicateSourceUrlError as exc:
         raise api_error(409, "SOURCE_URL_DUPLICATE", str(exc)) from exc
+
+
+@router.patch("/sources/{source_id}", response_model=SourceResponse)
+def update_source(
+    source_id: str,
+    payload: UpdateSourceRequest,
+    user: User = Depends(get_current_user),
+) -> SourceResponse:
+    existing = monitoring_store.get_source(user.workspace_id, source_id)
+    if existing is None:
+        raise api_error(404, "SOURCE_NOT_FOUND", "Source was not found.")
+    try:
+        target_url, allowed_domain = validate_public_url(str(payload.targetUrl), payload.allowedDomain)
+    except ValueError as exc:
+        raise api_error(422, "SOURCE_URL_INVALID", str(exc)) from exc
+    if payload.materialId and catalog_store.get_material(user.workspace_id, payload.materialId) is None:
+        raise api_error(409, "MATERIAL_REFERENCE_INVALID", "Material is unavailable in this workspace.")
+    if payload.materialGroupId and catalog_store.get_material_group(user.workspace_id, payload.materialGroupId) is None:
+        raise api_error(409, "MATERIAL_GROUP_REFERENCE_INVALID", "Material group is unavailable in this workspace.")
+    if payload.supplierId and not any(
+        item.id == payload.supplierId for item in catalog_store.list_suppliers(user.workspace_id)
+    ):
+        raise api_error(409, "SUPPLIER_REFERENCE_INVALID", "Supplier is unavailable in this workspace.")
+    updated = Source(
+        **{
+            **existing.__dict__,
+            "name": payload.name.strip(),
+            "target_url": target_url,
+            "allowed_domain": allowed_domain,
+            "schedule_minutes": payload.scheduleMinutes,
+            "signal_type": payload.signalType,
+            "material_id": payload.materialId,
+            "material_group_id": payload.materialGroupId,
+            "supplier_id": payload.supplierId,
+            "extraction_selector": payload.extractionSelector.strip() or "body",
+            "collection_mode": payload.collectionMode,
+            "navigation_goal": payload.navigationGoal.strip(),
+            "status": payload.status,
+            "updated_at": datetime.now(timezone.utc),
+        }
+    )
+    try:
+        return source_response(monitoring_store.update_source(updated))
+    except DuplicateSourceUrlError as exc:
+        raise api_error(409, "SOURCE_URL_DUPLICATE", str(exc)) from exc
+
+
+@router.delete("/sources/{source_id}", status_code=status.HTTP_204_NO_CONTENT)
+def archive_source(
+    source_id: str,
+    user: User = Depends(get_current_user),
+) -> Response:
+    existing = monitoring_store.get_source(user.workspace_id, source_id)
+    if existing is None:
+        raise api_error(404, "SOURCE_NOT_FOUND", "Source was not found.")
+    monitoring_store.update_source(Source(**{
+        **existing.__dict__,
+        "status": SourceStatus.ARCHIVED,
+        "updated_at": datetime.now(timezone.utc),
+    }))
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/sources", response_model=SourceListResponse)
@@ -318,11 +411,14 @@ def list_collection_jobs(
 @router.get("/external-signals", response_model=ExternalSignalListResponse)
 def list_external_signals(
     source_id: str | None = Query(default=None, alias="sourceId"),
+    review_status: ReviewStatus | None = Query(default=None, alias="reviewStatus"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, alias="pageSize", ge=1, le=100),
     user: User = Depends(get_current_user),
 ) -> ExternalSignalListResponse:
     records = monitoring_store.list_signals(user.workspace_id, source_id)
+    if review_status is not None:
+        records = [item for item in records if item.review_status == review_status]
     return ExternalSignalListResponse(
         data=[signal_response(item) for item in page_records(records, page, page_size)],
         pagination=pagination(page, page_size, len(records)),

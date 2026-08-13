@@ -1,92 +1,59 @@
 <template>
   <div class="space-y-5">
-    <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-      <div>
-        <p class="text-xs font-semibold uppercase text-emerald-700">External signals</p>
-        <h2 class="mt-1 text-xl font-semibold text-slate-900">情报信号</h2>
-        <p class="mt-1 text-sm text-slate-500">对比网页变化并回到原始证据，当前信号默认等待人工确认</p>
+    <header class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div><h2 class="text-xl font-semibold text-slate-900">物料情报</h2><p class="mt-1 text-sm text-slate-500">页面导航智能体采集证据，情报分析智能体判断变化是否与物料相关</p></div>
+      <button class="icon-button" title="刷新情报" type="button" @click="loadSignals"><RefreshCw :size="17" :class="loading ? 'animate-spin' : ''" /></button>
+    </header>
+    <div v-if="loadError" class="border-l-4 border-red-600 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">{{ loadError }}</div>
+
+    <section class="border border-slate-200 bg-white">
+      <div class="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"><div><h3 class="font-semibold">情报看板</h3><p class="mt-1 text-xs text-slate-500">共 {{ pagination.totalItems }} 条，按最近发现时间排序</p></div><select v-model="reviewFilter" class="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm" @change="changeFilter"><option value="">全部状态</option><option value="PENDING">待人工确认</option><option value="CONFIRMED">已确认</option><option value="DISMISSED">已忽略</option></select></div>
+      <div v-if="loading" class="empty-state"><LoaderCircle class="mr-2 animate-spin" :size="18" />正在加载情报...</div>
+      <div v-else-if="!signals.length" class="empty-state flex-col text-center"><Activity :size="30" class="text-slate-300" /><p class="mt-3 font-medium text-slate-800">当前没有物料情报</p><p class="mt-1 text-sm text-slate-500">外部监控建立基线后，AI 只会保留与绑定物料相关的变化。</p></div>
+      <div v-else class="overflow-x-auto">
+        <table class="w-full min-w-[1080px] table-fixed text-left text-sm">
+          <thead class="bg-slate-50 text-xs text-slate-500"><tr><th class="w-[18%] px-4 py-3">物料</th><th class="w-[35%] px-4 py-3">AI 情报摘要</th><th class="w-[10%] px-4 py-3">变化类型</th><th class="w-[12%] px-4 py-3">来源</th><th class="w-[10%] px-4 py-3">可信度</th><th class="w-[9%] px-4 py-3">状态</th><th class="w-[6%] px-4 py-3 text-right">详情</th></tr></thead>
+          <tbody class="divide-y divide-slate-100"><tr v-for="signal in signals" :key="signal.id" class="hover:bg-slate-50" :class="selectedId === signal.id ? 'bg-emerald-50/60' : ''">
+            <td class="px-4 py-3"><p class="truncate font-medium text-slate-900">{{ materialName(signal.materialId) }}</p><p class="mt-1 truncate font-mono text-xs text-slate-400">{{ materialCode(signal.materialId) }}</p></td>
+            <td class="px-4 py-3"><p class="line-clamp-2 font-medium leading-5 text-slate-800">{{ signal.aiAnalyzed ? signal.summary : '历史采集差异，等待重新执行 AI 分析' }}</p><p class="mt-1 text-xs text-slate-400">{{ signal.aiAnalyzed ? `由 ${signal.analysisModel || 'AI'} 分析` : '历史待重分析' }} · {{ formatDate(signal.observedAt) }}</p></td>
+            <td class="px-4 py-3"><span class="type-chip">{{ signalTypeLabel(signal.signalType) }}</span></td><td class="truncate px-4 py-3 text-slate-600">{{ sourceName(signal.sourceId) }}</td><td class="px-4 py-3"><div class="h-1.5 w-20 bg-slate-100"><div class="h-full bg-emerald-600" :style="{ width: `${Math.round(signal.confidence * 100)}%` }" /></div><span class="mt-1 block text-xs text-slate-500">{{ Math.round(signal.confidence * 100) }}%</span></td><td class="px-4 py-3"><span class="status" :class="statusClass(signal.reviewStatus)">{{ reviewStatusLabel(signal.reviewStatus) }}</span></td><td class="px-4 py-3 text-right"><button class="icon-button" title="查看分析详情" type="button" @click="selectSignal(signal)"><FileSearch :size="16" /></button></td>
+          </tr></tbody>
+        </table>
       </div>
-      <button class="icon-button" title="刷新信号" type="button" @click="loadSignals"><RefreshCw :size="17" :class="loading ? 'animate-spin' : ''" /></button>
-    </div>
+      <footer v-if="pagination.totalPages > 1" class="flex items-center justify-between border-t border-slate-200 px-5 py-3 text-sm"><span class="text-slate-500">第 {{ pagination.page }} / {{ pagination.totalPages }} 页</span><div class="flex gap-2"><button class="page-button" :disabled="pagination.page <= 1" type="button" @click="goPage(pagination.page - 1)"><ChevronLeft :size="16" />上一页</button><button class="page-button" :disabled="pagination.page >= pagination.totalPages" type="button" @click="goPage(pagination.page + 1)">下一页<ChevronRight :size="16" /></button></div></footer>
+    </section>
 
-    <div v-if="loadError" class="flex items-center justify-between gap-3 border-l-4 border-red-600 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert"><span>{{ loadError }}</span><button class="font-medium underline" type="button" @click="loadSignals">重试</button></div>
-
-    <div class="grid gap-5 xl:grid-cols-[minmax(0,0.9fr)_minmax(420px,1.1fr)]">
-      <section class="border border-slate-200 bg-white">
-        <div class="border-b border-slate-200 px-5 py-4"><h3 class="font-semibold">变化列表</h3><p class="mt-1 text-xs text-slate-500">{{ signals.length }} 条待追溯信号</p></div>
-        <div v-if="loading" class="empty-state"><LoaderCircle class="mr-2 animate-spin" :size="18" />正在加载信号...</div>
-        <div v-else-if="signals.length === 0" class="empty-state flex-col text-center"><Activity :size="30" class="text-slate-300" /><p class="mt-3 font-medium text-slate-800">暂无变化信号</p><p class="mt-1 text-sm text-slate-500">来源第二次及后续采集发生内容变化时会生成信号。</p></div>
-        <div v-else class="divide-y divide-slate-100">
-          <button v-for="signal in signals" :key="signal.id" class="w-full px-5 py-4 text-left hover:bg-slate-50" :class="selectedId === signal.id ? 'bg-emerald-50/60' : ''" type="button" @click="selectSignal(signal)">
-            <div class="flex items-center justify-between gap-3"><span class="type-chip">{{ signalTypeLabel(signal.signalType) }}</span><span class="status" :class="statusClass(signal.reviewStatus)">{{ reviewStatusLabel(signal.reviewStatus) }}</span></div>
-            <p class="mt-3 line-clamp-2 text-sm font-medium text-slate-900">{{ signal.currentValue }}</p>
-            <div class="mt-2 flex items-center justify-between gap-3 text-xs text-slate-400"><span>{{ sourceName(signal.sourceId) }}</span><span>{{ formatDate(signal.observedAt) }}</span></div>
-          </button>
-        </div>
-      </section>
-
-      <section class="border border-slate-200 bg-white">
-        <div v-if="!selectedSignal" class="empty-state flex-col text-center"><FileSearch :size="30" class="text-slate-300" /><p class="mt-3 font-medium text-slate-800">选择一条信号查看差异</p></div>
-        <template v-else>
-          <div class="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
-            <div><div class="flex items-center gap-2"><span class="type-chip">{{ signalTypeLabel(selectedSignal.signalType) }}</span><span class="status" :class="statusClass(selectedSignal.reviewStatus)">{{ reviewStatusLabel(selectedSignal.reviewStatus) }}</span></div><h3 class="mt-3 font-semibold text-slate-900">{{ sourceName(selectedSignal.sourceId) }}</h3><p class="mt-1 text-xs text-slate-500">观测于 {{ formatDate(selectedSignal.observedAt) }} · 置信度 {{ Math.round(selectedSignal.confidence * 100) }}%</p></div>
-            <div class="flex flex-wrap items-center justify-end gap-2">
-              <button v-if="selectedSignal.reviewStatus !== 'CONFIRMED'" class="review-button confirm-button" :disabled="Boolean(reviewing)" type="button" @click="reviewSignal('CONFIRMED')"><LoaderCircle v-if="reviewing === 'CONFIRMED'" class="animate-spin" :size="15" /><Check v-else :size="15" />确认</button>
-              <button v-if="selectedSignal.reviewStatus !== 'DISMISSED'" class="review-button dismiss-button" :disabled="Boolean(reviewing)" type="button" @click="reviewSignal('DISMISSED')"><LoaderCircle v-if="reviewing === 'DISMISSED'" class="animate-spin" :size="15" /><X v-else :size="15" />忽略</button>
-              <button class="secondary-button" :disabled="evidenceLoading" type="button" @click="loadEvidence(selectedSignal.documentId)"><LoaderCircle v-if="evidenceLoading" class="animate-spin" :size="15" /><FileSearch v-else :size="15" />查看证据</button>
-            </div>
-          </div>
-          <div class="grid gap-px bg-slate-200 md:grid-cols-2">
-            <div class="bg-white p-5"><p class="text-xs font-semibold uppercase text-slate-400">Previous</p><p class="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-slate-600">{{ selectedSignal.previousValue }}</p></div>
-            <div class="bg-white p-5"><p class="text-xs font-semibold uppercase text-emerald-700">Current</p><p class="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-slate-900">{{ selectedSignal.currentValue }}</p></div>
-          </div>
-          <div class="border-t border-slate-200 bg-slate-50 p-5">
-            <div class="flex items-center justify-between gap-3"><h4 class="text-sm font-semibold text-slate-800">证据快照</h4><a v-if="evidence" class="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 hover:underline" :href="evidence.finalUrl" rel="noreferrer" target="_blank">打开原页面<ExternalLink :size="13" /></a></div>
-            <p v-if="evidenceError" class="mt-3 text-sm text-red-700" role="alert">{{ evidenceError }}</p>
-            <div v-else-if="evidence" class="mt-3 space-y-3"><div class="flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-500"><span>HTTP {{ evidence.statusCode }}</span><span>{{ evidence.title || "无标题" }}</span><span>{{ formatDate(evidence.collectedAt) }}</span></div><pre class="max-h-72 overflow-auto whitespace-pre-wrap break-words border border-slate-200 bg-white p-4 font-sans text-sm leading-6 text-slate-700">{{ evidence.extractedText }}</pre></div>
-            <p v-else class="mt-3 text-sm text-slate-500">点击“查看证据”加载保存的正文快照。</p>
-          </div>
-        </template>
-      </section>
-    </div>
+    <section v-if="selectedSignal" class="border border-slate-200 bg-white">
+      <div class="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 sm:flex-row sm:items-start sm:justify-between"><div><div class="flex flex-wrap items-center gap-2"><span class="type-chip">{{ signalTypeLabel(selectedSignal.signalType) }}</span><span class="status" :class="statusClass(selectedSignal.reviewStatus)">{{ reviewStatusLabel(selectedSignal.reviewStatus) }}</span></div><h3 class="mt-3 font-semibold text-slate-900">{{ materialName(selectedSignal.materialId) }} · {{ selectedSignal.summary }}</h3><p class="mt-1 text-xs text-slate-500">{{ sourceName(selectedSignal.sourceId) }} · {{ formatDate(selectedSignal.observedAt) }}</p></div><div class="flex gap-2"><button v-if="selectedSignal.reviewStatus !== 'CONFIRMED'" class="confirm-button" :disabled="Boolean(reviewing)" type="button" @click="reviewSignal('CONFIRMED')"><Check :size="15" />确认情报</button><button v-if="selectedSignal.reviewStatus !== 'DISMISSED'" class="secondary-button" :disabled="Boolean(reviewing)" type="button" @click="reviewSignal('DISMISSED')"><X :size="15" />忽略</button><button class="secondary-button" :disabled="evidenceLoading" type="button" @click="loadEvidence(selectedSignal.documentId)"><FileSearch :size="15" />查看证据</button></div></div>
+      <div class="grid gap-px bg-slate-200 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_320px]"><div class="bg-white p-5"><p class="text-xs font-semibold text-slate-400">变化前</p><p class="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-slate-600">{{ selectedSignal.previousValue || '无可比较值' }}</p></div><div class="bg-white p-5"><p class="text-xs font-semibold text-emerald-700">变化后</p><p class="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-slate-900">{{ selectedSignal.currentValue }}</p></div><aside class="bg-white p-5"><p class="text-xs font-semibold text-slate-500">AI 判断依据</p><p class="mt-3 text-sm leading-6 text-slate-700">{{ selectedSignal.analysisRationale || '旧版信号未保存结构化分析依据。' }}</p><p class="mt-4 text-xs text-slate-400">确认后才会进入采购建议与报告上下文；忽略后不再参与下游计算。</p></aside></div>
+      <div v-if="evidenceLoading || evidence || evidenceError" class="border-t border-slate-200 bg-slate-50 p-5"><div class="flex items-center justify-between"><h4 class="text-sm font-semibold">原始证据</h4><a v-if="evidence" class="inline-flex items-center gap-1 text-xs text-emerald-700" :href="evidence.finalUrl" rel="noreferrer" target="_blank">打开来源页<ExternalLink :size="13" /></a></div><p v-if="evidenceError" class="mt-3 text-sm text-red-700">{{ evidenceError }}</p><div v-else-if="evidence" class="mt-3"><p class="text-xs text-slate-500">{{ evidence.title || '无标题' }} · HTTP {{ evidence.statusCode }}</p><pre class="mt-3 max-h-72 overflow-auto whitespace-pre-wrap border border-slate-200 bg-white p-4 font-sans text-sm leading-6 text-slate-700">{{ evidence.extractedText }}</pre></div><p v-else class="mt-3 text-sm text-slate-500">正在加载证据...</p></div>
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
-import { Activity, Check, ExternalLink, FileSearch, LoaderCircle, RefreshCw, X } from "lucide-vue-next"
-import type { EvidenceDocument, ExternalSignal, ListEnvelope, MonitoringSource, SignalType } from "~/types/catalog"
+import { Activity, Check, ChevronLeft, ChevronRight, ExternalLink, FileSearch, LoaderCircle, RefreshCw, X } from "lucide-vue-next"
+import type { EvidenceDocument, ExternalSignal, ListEnvelope, Material, MonitoringSource, Pagination, SignalType } from "~/types/catalog"
 const { request, errorMessage } = useApiClient()
-const signals = ref<ExternalSignal[]>([])
-const sources = ref<MonitoringSource[]>([])
-const selectedId = ref("")
-const evidence = ref<EvidenceDocument | null>(null)
-const loading = ref(true)
-const evidenceLoading = ref(false)
-const reviewing = ref<"CONFIRMED" | "DISMISSED" | "">("")
-const loadError = ref("")
-const evidenceError = ref("")
+const signals = ref<ExternalSignal[]>([]); const sources = ref<MonitoringSource[]>([]); const materials = ref<Material[]>([]); const selectedId = ref(""); const evidence = ref<EvidenceDocument | null>(null); const loading = ref(true); const evidenceLoading = ref(false); const reviewing = ref<"CONFIRMED" | "DISMISSED" | "">(""); const loadError = ref(""); const evidenceError = ref(""); const reviewFilter = ref(""); const page = ref(1); const pagination = reactive<Pagination>({ page: 1, pageSize: 10, totalItems: 0, totalPages: 0 })
 const selectedSignal = computed(() => signals.value.find(item => item.id === selectedId.value) || null)
-async function loadSignals() { loading.value = true; loadError.value = ""; try { const [signalResult, sourceResult] = await Promise.all([request<ListEnvelope<ExternalSignal>>("/api/v1/external-signals", { query: { pageSize: 100 } }), request<ListEnvelope<MonitoringSource>>("/api/v1/sources", { query: { pageSize: 100 } })]); signals.value = signalResult.data; sources.value = sourceResult.data; if (!selectedId.value && signals.value.length) selectSignal(signals.value[0]) } catch (error) { loadError.value = errorMessage(error, "情报信号加载失败。") } finally { loading.value = false } }
+async function loadSignals() { loading.value = true; loadError.value = ""; try { const [signalResult, sourceResult, materialResult] = await Promise.all([request<ListEnvelope<ExternalSignal>>("/api/v1/external-signals", { query: { page: page.value, pageSize: 10, reviewStatus: reviewFilter.value || undefined } }), request<ListEnvelope<MonitoringSource>>("/api/v1/sources", { query: { pageSize: 100 } }), request<ListEnvelope<Material>>("/api/v1/materials", { query: { pageSize: 100 } })]); signals.value = signalResult.data; Object.assign(pagination, signalResult.pagination); sources.value = sourceResult.data; materials.value = materialResult.data; if (!signals.value.some(item => item.id === selectedId.value)) selectedId.value = "" } catch (error) { loadError.value = errorMessage(error, "物料情报加载失败。") } finally { loading.value = false } }
+function changeFilter() { page.value = 1; selectedId.value = ""; loadSignals() }
+function goPage(value: number) { page.value = value; selectedId.value = ""; loadSignals() }
 function selectSignal(signal: ExternalSignal) { selectedId.value = signal.id; evidence.value = null; evidenceError.value = "" }
 async function loadEvidence(id: string) { evidenceLoading.value = true; evidenceError.value = ""; try { evidence.value = await request<EvidenceDocument>(`/api/v1/documents/${id}`) } catch (error) { evidenceError.value = errorMessage(error, "证据加载失败。") } finally { evidenceLoading.value = false } }
-async function reviewSignal(reviewStatus: "CONFIRMED" | "DISMISSED") { if (!selectedSignal.value) return; reviewing.value = reviewStatus; loadError.value = ""; try { const updated = await request<ExternalSignal>(`/api/v1/external-signals/${selectedSignal.value.id}`, { method: "PATCH", body: { reviewStatus } }); const index = signals.value.findIndex(item => item.id === updated.id); if (index >= 0) signals.value[index] = updated } catch (error) { loadError.value = errorMessage(error, "信号审核失败。") } finally { reviewing.value = "" } }
+async function reviewSignal(reviewStatus: "CONFIRMED" | "DISMISSED") { if (!selectedSignal.value) return; reviewing.value = reviewStatus; try { const updated = await request<ExternalSignal>(`/api/v1/external-signals/${selectedSignal.value.id}`, { method: "PATCH", body: { reviewStatus } }); const index = signals.value.findIndex(item => item.id === updated.id); if (index >= 0) signals.value[index] = updated } catch (error) { loadError.value = errorMessage(error, "情报审核失败。") } finally { reviewing.value = "" } }
 function sourceName(id: string) { return sources.value.find(item => item.id === id)?.name || id }
-function signalTypeLabel(value: SignalType) { return ({ PRICE: "价格", SPECIFICATION: "规格", AVAILABILITY: "可用性", LEAD_TIME: "交期", SUPPLIER_EVENT: "供应商事件" } as Record<SignalType, string>)[value] }
-function reviewStatusLabel(value: ExternalSignal["reviewStatus"]) { return ({ PENDING: "待审核", CONFIRMED: "已确认", DISMISSED: "已忽略" } as const)[value] }
-function statusClass(value: ExternalSignal["reviewStatus"]) { return { "status-confirmed": value === "CONFIRMED", "status-dismissed": value === "DISMISSED" } }
+function material(id: string | null) { return materials.value.find(item => item.id === id) }
+function materialName(id: string | null) { return material(id)?.name || "物料组综合情报" }
+function materialCode(id: string | null) { return material(id)?.externalCode || "GROUP" }
+function signalTypeLabel(value: SignalType) { return ({ PRICE: "价格", SPECIFICATION: "规格", AVAILABILITY: "可用性", LEAD_TIME: "交期", SUPPLIER_EVENT: "供应事件" } as Record<SignalType, string>)[value] }
+function reviewStatusLabel(value: ExternalSignal["reviewStatus"]) { return ({ PENDING: "待确认", CONFIRMED: "已确认", DISMISSED: "已忽略" } as const)[value] }
+function statusClass(value: ExternalSignal["reviewStatus"]) { return value === "CONFIRMED" ? "confirmed" : value === "DISMISSED" ? "dismissed" : "pending" }
 function formatDate(value: string) { return new Intl.DateTimeFormat("zh-CN", { dateStyle: "short", timeStyle: "short" }).format(new Date(value)) }
 onMounted(loadSignals)
 </script>
 
 <style scoped>
-.icon-button { @apply flex h-9 w-9 items-center justify-center rounded-md border border-slate-300 text-slate-600 hover:bg-slate-50; }
-.secondary-button { @apply inline-flex h-9 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50; }
-.review-button { @apply inline-flex h-9 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium disabled:opacity-50; }
-.confirm-button { @apply bg-emerald-700 text-white hover:bg-emerald-800; }
-.dismiss-button { @apply border border-slate-300 bg-white text-slate-600 hover:bg-slate-50; }
-.empty-state { @apply flex min-h-56 items-center justify-center px-6 text-sm text-slate-500; }
-.type-chip { @apply rounded bg-sky-50 px-2 py-1 text-xs font-medium text-sky-700; }
-.status { @apply rounded bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700; }
-.status-confirmed { @apply bg-emerald-50 text-emerald-700; }
-.status-dismissed { @apply bg-slate-100 text-slate-500; }
+.icon-button { @apply inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 hover:bg-slate-50; }.secondary-button,.page-button { @apply inline-flex h-9 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50; }.confirm-button { @apply inline-flex h-9 items-center justify-center gap-2 rounded-md bg-emerald-700 px-3 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50; }.empty-state { @apply flex min-h-56 items-center justify-center px-6 text-sm text-slate-500; }.type-chip { @apply rounded bg-sky-50 px-2 py-1 text-xs font-medium text-sky-700; }.status { @apply rounded px-2 py-1 text-xs font-medium; }.pending { @apply bg-amber-50 text-amber-700; }.confirmed { @apply bg-emerald-50 text-emerald-700; }.dismissed { @apply bg-slate-100 text-slate-500; }
 </style>

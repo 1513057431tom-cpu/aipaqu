@@ -13,9 +13,15 @@ from app.core.agents import (
     AgentStep,
     ExecutionMode,
     ModelConfiguration,
+    ReportTemplate,
 )
 from app.core.secrets import SecretCipher
-from app.persistence.models import AgentConfigurationModel, AgentRunModel, ModelConfigurationModel
+from app.persistence.models import (
+    AgentConfigurationModel,
+    AgentRunModel,
+    ModelConfigurationModel,
+    ReportTemplateModel,
+)
 from app.persistence.stores import utc_aware, utc_naive
 
 
@@ -154,3 +160,42 @@ class SqlAlchemyAgentConfigurationStore:
             model.updated_at = utc_naive(configuration.updated_at)
             session.commit()
         return configuration
+
+    def get_report_template(self, workspace_id: str, period: str) -> ReportTemplate | None:
+        with Session(self.engine) as session:
+            model = session.scalar(
+                select(ReportTemplateModel).where(
+                    ReportTemplateModel.workspace_id == workspace_id,
+                    ReportTemplateModel.period == period,
+                )
+            )
+        if model is None:
+            return None
+        return ReportTemplate(
+            workspace_id=model.workspace_id,
+            period=model.period,
+            name=model.name,
+            content=model.content,
+            updated_at=utc_aware(model.updated_at),
+        )
+
+    def save_report_template(self, template: ReportTemplate) -> ReportTemplate:
+        with Session(self.engine) as session:
+            model = session.scalar(
+                select(ReportTemplateModel).where(
+                    ReportTemplateModel.workspace_id == template.workspace_id,
+                    ReportTemplateModel.period == template.period,
+                )
+            )
+            if model is None:
+                model = ReportTemplateModel(
+                    id=f"rtpl_{uuid4().hex}",
+                    workspace_id=template.workspace_id,
+                    period=template.period,
+                )
+                session.add(model)
+            model.name = template.name
+            model.content = template.content
+            model.updated_at = utc_naive(template.updated_at)
+            session.commit()
+        return template

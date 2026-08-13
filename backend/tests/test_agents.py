@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from app.core.agents import DEFAULT_SYSTEM_PROMPT
+from app.core.agents import DEFAULT_AGENT_PROMPTS
 from app.main import create_app
 
 
@@ -117,9 +117,33 @@ def test_admin_can_update_material_monitor_agent_configuration() -> None:
     assert saved.json() == body
 
 
-def test_default_agent_configuration_uses_chinese_customer_copy() -> None:
-    assert "物料监测分析智能体" in DEFAULT_SYSTEM_PROMPT
-    assert " Agent" not in DEFAULT_SYSTEM_PROMPT
+def test_default_agent_configurations_use_chinese_customer_copy() -> None:
+    assert len(DEFAULT_AGENT_PROMPTS) == 5
+    assert all("智能体" in prompt for prompt in DEFAULT_AGENT_PROMPTS.values())
+    assert all(" Agent" not in prompt for prompt in DEFAULT_AGENT_PROMPTS.values())
+
+
+def test_admin_can_manage_report_templates() -> None:
+    client = TestClient(create_app())
+    login(client)
+
+    templates = client.get("/api/v1/report-templates")
+    updated = client.put(
+        "/api/v1/report-templates/DAILY",
+        json={
+            "name": "采购日报模板",
+            "content": "# {{title}}\n\n## 物料情报\n{{material_intelligence}}\n\n{{evidence}}",
+        },
+    )
+
+    assert templates.status_code == 200
+    assert [item["period"] for item in templates.json()["data"]] == [
+        "DAILY",
+        "WEEKLY",
+        "MONTHLY",
+    ]
+    assert updated.status_code == 200
+    assert updated.json()["name"] == "采购日报模板"
 
 
 def test_agent_configuration_rejects_unknown_tools() -> None:

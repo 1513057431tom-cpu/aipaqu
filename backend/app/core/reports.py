@@ -149,14 +149,32 @@ def _dates(start: date, end: date) -> list[date]:
 
 
 class ReportService:
-    def __init__(self, store: ReportStore, catalog_store, internal_store, monitoring_store, recommendation_store) -> None:
+    def __init__(
+        self,
+        store: ReportStore,
+        catalog_store,
+        internal_store,
+        monitoring_store,
+        recommendation_store,
+        agent_service=None,
+    ) -> None:
         self.store = store
         self.catalog_store = catalog_store
         self.internal_store = internal_store
         self.monitoring_store = monitoring_store
         self.recommendation_store = recommendation_store
+        self.agent_service = agent_service
 
-    def create(self, workspace_id: str, actor_id: str, title: str, period: ReportPeriod, start: date, end: date) -> tuple[Report, ReportVersion]:
+    def create(
+        self,
+        workspace_id: str,
+        actor_id: str,
+        title: str,
+        period: ReportPeriod,
+        start: date,
+        end: date,
+        template_content: str | None = None,
+    ) -> tuple[Report, ReportVersion]:
         if end < start:
             raise ValueError("Period end cannot be before period start.")
         if period == ReportPeriod.DAILY and start != end:
@@ -185,7 +203,28 @@ class ReportService:
             input_mode = "AGGREGATE_DAILY_SNAPSHOTS"
             now = datetime.now(timezone.utc)
         report_id = f"report_{uuid4().hex}"
-        markdown = self._markdown(title, period, start, end, snapshots)
+        markdown = self._markdown(title, period, start, end, snapshots, template_content)
+        if self.agent_service is not None:
+            ai_markdown = self.agent_service.write_report(
+                workspace_id,
+                {
+                    "title": title,
+                    "period": period.value,
+                    "period_start": start,
+                    "period_end": end,
+                    "template": template_content,
+                    "daily_snapshots": [
+                        json.loads(item.structured_data_json) for item in snapshots
+                    ],
+                    "deterministic_draft": markdown,
+                    "instruction": (
+                        "严格保留证据引用和模板章节，不得把未确认情报写成事实，"
+                        "输出完整 Markdown。"
+                    ),
+                },
+            )
+            if ai_markdown:
+                markdown = ai_markdown
         version = ReportVersion(
             id=f"rpv_{uuid4().hex}", report_id=report_id, version=1,
             markdown=markdown, content_digest=_digest(markdown), change_source="SYSTEM_DRAFT",
@@ -259,7 +298,17 @@ class ReportService:
             "demandCount": len(self.internal_store.list_demands(workspace_id)),
             "openSupplyCount": len(self.internal_store.list_open_supply(workspace_id)),
             "confirmedSignals": [
-                {"id": signal.id, "evidenceRef": signal.evidence_ref}
+                {
+                    "id": signal.id,
+                    "materialId": signal.material_id,
+                    "signalType": signal.signal_type.value,
+                    "summary": signal.summary,
+                    "previousValue": signal.previous_value,
+                    "currentValue": signal.current_value,
+                    "confidence": signal.confidence,
+                    "analysisRationale": signal.analysis_rationale,
+                    "evidenceRef": signal.evidence_ref,
+                }
                 for signal in signals
                 if signal.review_status.value == "CONFIRMED"
             ],
@@ -277,26 +326,62 @@ class ReportService:
         }
 
     @staticmethod
-    def _markdown(title: str, period: ReportPeriod, start: date, end: date, snapshots: list[DailyIntelligenceSnapshot]) -> str:
-        lines = [f"# {title}", "", f"- 周期：{period.value}", f"- 分析区间：{start.isoformat()} 至 {end.isoformat()}", f"- 日报快照：{len(snapshots)} 个", "", "## 情报摘要", ""]
+    def _markdown(
+        title: str,
+        period: ReportPeriod,
+        start: date,
+        end: date,
+        snapshots: list[DailyIntelligenceSnapshot],
+        template_content: str | None = None,
+    ) -> str:
+        highlights = [
+            f"- 分析区间：{start.isoformat()} 至 {end.isoformat()}",
+            f"- 日报快照：{len(snapshots)} 个",
+        ]
+        material_intelligence: list[str] = []
+        recommendation_lines: list[str] = []
+        evidence_lines = ["#### 引用"]
         for snapshot in snapshots:
             data = json.loads(snapshot.structured_data_json)
-            lines.append(f"### {snapshot.covered_date.isoformat()}")
-            lines.append(f"- 库存记录：{data.get('inventoryCount', 0)}")
-            lines.append(f"- 需求记录：{data.get('demandCount', 0)}")
-            lines.append(f"- 在途记录：{data.get('openSupplyCount', 0)}")
             signals = data.get("confirmedSignals", [])
             recommendations = data.get("recommendations", [])
-            lines.append(f"- 已确认外部信号：{len(signals)}")
-            lines.append(f"- 采购建议：{len(recommendations)}")
-            lines.extend(["", "#### 引用"])
-            references = [
+            material_intelligence.extend([
+                f"### {snapshot.covered_date.isoformat()}",
+                f"- 已确认外部情报：{len(signals)}",
+                f"- 库存记录：{data.get('inventoryCount', 0)}",
+                f"- 需求记录：{data.get('demandCount', 0)}",
+                f"- 在途记录：{data.get('openSupplyCount', 0)}",
+                "",
+            ])
+            material_intelligence.extend(
+                f"- `{signal.get('materialId') or 'GROUP'}` {signal.get('summary') or '物料变化'}"
+                for signal in signals
+            )
+            if signals:
+                material_intelligence.append("")
+            recommendation_lines.append(
+                f"- {snapshot.covered_date.isoformat()}：{len(recommendations)} 条采购建议"
+            )
+            evidence_lines.extend(
                 f"- 外部信号 `{signal['id']}`：{signal['evidenceRef']}"
                 for signal in signals
-            ]
+            )
             for recommendation in recommendations:
                 refs = "、".join(recommendation.get("evidenceRefs", [])) or "无外部证据"
-                references.append(f"- 采购建议 `{recommendation['id']}`：{refs}")
-            lines.extend(references or ["- 本日无已确认外部信号或采购建议。"])
-            lines.append("")
-        return "\n".join(lines).rstrip()
+                evidence_lines.append(f"- 采购建议 `{recommendation['id']}`：{refs}")
+        if len(evidence_lines) == 1:
+            evidence_lines.append("- 所选周期内无已确认外部情报或采购建议。")
+        values = {
+            "{{title}}": title,
+            "{{highlights}}": "\n".join(highlights),
+            "{{material_intelligence}}": "\n".join(material_intelligence).rstrip() or "- 暂无已确认物料情报。",
+            "{{recommendations}}": "\n".join(recommendation_lines) or "- 暂无采购建议。",
+            "{{evidence}}": "\n".join(evidence_lines),
+        }
+        markdown = template_content or (
+            "# {{title}}\n\n## 情报摘要\n{{highlights}}\n\n## 物料情报\n"
+            "{{material_intelligence}}\n\n## 采购建议\n{{recommendations}}\n\n{{evidence}}"
+        )
+        for placeholder, value in values.items():
+            markdown = markdown.replace(placeholder, value)
+        return markdown.rstrip()

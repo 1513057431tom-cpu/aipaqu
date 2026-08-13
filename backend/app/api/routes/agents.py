@@ -14,6 +14,7 @@ from app.core.agents import (
     ExecutionMode,
     ModelConfiguration,
     ModelNotConfiguredError,
+    ReportTemplate,
 )
 from app.core.auth import Role, User, get_current_user, require_role
 from app.core.errors import api_error
@@ -134,6 +135,27 @@ class AgentRunListResponse(BaseModel):
     data: list[AgentRunResponse]
 
 
+class ReportTemplateResponse(BaseModel):
+    period: str
+    name: str
+    content: str
+    updatedAt: datetime | None
+
+
+class ReportTemplateListResponse(BaseModel):
+    data: list[ReportTemplateResponse]
+
+
+class UpdateReportTemplateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    content: str = Field(min_length=20, max_length=100_000)
+
+    @field_validator("name", "content")
+    @classmethod
+    def strip_template_text(cls, value: str) -> str:
+        return value.strip()
+
+
 def definition_response(
     definition: AgentDefinition,
     model_configuration: ModelConfiguration,
@@ -203,12 +225,13 @@ def run_response(run: AgentRun) -> AgentRunResponse:
 @router.get("/agents", response_model=AgentDefinitionListResponse)
 def list_agents(user: User = Depends(get_current_user)) -> AgentDefinitionListResponse:
     model_configuration = agent_service.get_model_configuration(user.workspace_id)
-    agent_configuration = agent_service.get_agent_configuration(
-        user.workspace_id, "material-monitor"
-    )
     return AgentDefinitionListResponse(
         data=[
-            definition_response(definition, model_configuration, agent_configuration)
+            definition_response(
+                definition,
+                model_configuration,
+                agent_service.get_agent_configuration(user.workspace_id, definition.key),
+            )
             for definition in agent_service.list_definitions()
         ]
     )
@@ -285,8 +308,49 @@ def test_model_connection(
 
 
 def ensure_agent_exists(agent_key: str) -> None:
-    if agent_key != "material-monitor":
+    if not any(item.key == agent_key for item in agent_service.list_definitions()):
         raise api_error(status.HTTP_404_NOT_FOUND, "AGENT_NOT_FOUND", "Agent was not found.")
+
+
+def ensure_period_exists(period: str) -> str:
+    normalized = period.upper()
+    if normalized not in {"DAILY", "WEEKLY", "MONTHLY"}:
+        raise api_error(status.HTTP_404_NOT_FOUND, "REPORT_TEMPLATE_NOT_FOUND", "Report template was not found.")
+    return normalized
+
+
+def report_template_response(template: ReportTemplate) -> ReportTemplateResponse:
+    return ReportTemplateResponse(
+        period=template.period,
+        name=template.name,
+        content=template.content,
+        updatedAt=template.updated_at,
+    )
+
+
+@router.get("/report-templates", response_model=ReportTemplateListResponse)
+def list_report_templates(user: User = Depends(get_current_user)) -> ReportTemplateListResponse:
+    return ReportTemplateListResponse(
+        data=[report_template_response(item) for item in agent_service.list_report_templates(user.workspace_id)]
+    )
+
+
+@router.put("/report-templates/{period}", response_model=ReportTemplateResponse)
+def update_report_template(
+    period: str,
+    payload: UpdateReportTemplateRequest,
+    user: User = Depends(get_current_user),
+) -> ReportTemplateResponse:
+    require_role(user, {Role.ADMIN})
+    normalized = ensure_period_exists(period)
+    template = ReportTemplate(
+        workspace_id=user.workspace_id,
+        period=normalized,
+        name=payload.name,
+        content=payload.content,
+        updated_at=datetime.now(timezone.utc),
+    )
+    return report_template_response(agent_service.save_report_template(template))
 
 
 @router.get(
@@ -337,6 +401,12 @@ def run_agent(
     user: User = Depends(get_current_user),
 ) -> AgentRunResponse:
     ensure_agent_exists(agent_key)
+    if agent_key != "material-monitor":
+        raise api_error(
+            status.HTTP_409_CONFLICT,
+            "SPECIALIZED_AGENT_REQUIRES_ORCHESTRATOR",
+            "Specialized agents are invoked by the monitoring orchestrator with business context.",
+        )
     for material_id in payload.materialIds:
         if catalog_store.get_material(user.workspace_id, material_id) is None:
             raise api_error(

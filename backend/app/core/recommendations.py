@@ -175,11 +175,19 @@ def _normalize_number(value: float) -> float:
 
 
 class PlanningEngine:
-    def __init__(self, catalog_store, internal_data_store, monitoring_store, recommendation_store: RecommendationStore) -> None:
+    def __init__(
+        self,
+        catalog_store,
+        internal_data_store,
+        monitoring_store,
+        recommendation_store: RecommendationStore,
+        agent_service=None,
+    ) -> None:
         self.catalog_store = catalog_store
         self.internal_data_store = internal_data_store
         self.monitoring_store = monitoring_store
         self.recommendation_store = recommendation_store
+        self.agent_service = agent_service
 
     def generate(self, workspace_id: str, as_of_date: date, horizon_days: int) -> GenerationResult:
         horizon_end = as_of_date + timedelta(days=horizon_days)
@@ -301,6 +309,39 @@ class PlanningEngine:
                 reason_codes.append("ORDER_DUE")
             if confirmed_signals:
                 reason_codes.append("CONFIRMED_EXTERNAL_SIGNAL")
+            deterministic_explanation = (
+                f"期间需求 {calculation.demand_qty:g} {material.base_unit}，可用库存 "
+                f"{calculation.available_qty:g}，按期在途 {calculation.open_supply_qty:g}，"
+                f"为保留安全库存 {calculation.safety_stock_qty:g}，建议补充 "
+                f"{recommended_qty:g} {material.base_unit}。"
+            )
+            ai_explanation = self.agent_service.explain_procurement(
+                workspace_id,
+                {
+                    "material": {
+                        "id": material.id,
+                        "code": material.external_code,
+                        "name": material.name,
+                        "specification": material.specification,
+                    },
+                    "rule_calculation": asdict(calculation),
+                    "recommended_order_date": recommended_order_date,
+                    "latest_order_date": latest_order_date,
+                    "recommended_qty": recommended_qty,
+                    "unit": material.base_unit,
+                    "confirmed_external_intelligence": [
+                        {
+                            "id": item.id,
+                            "summary": item.summary,
+                            "rationale": item.analysis_rationale,
+                            "confidence": item.confidence,
+                            "evidence_ref": item.evidence_ref,
+                        }
+                        for item in confirmed_signals
+                    ],
+                    "instruction": "不得修改规则计算出的数量和日期，只解释依据、风险和假设。",
+                },
+            ) if self.agent_service is not None else None
             recommendation = ProcurementRecommendation(
                 id=f"rec_{uuid4().hex}",
                 workspace_id=workspace_id,
@@ -314,12 +355,7 @@ class PlanningEngine:
                 risk_level=risk_level,
                 reason_codes=tuple(reason_codes),
                 calculation=calculation,
-                explanation=(
-                    f"期间需求 {calculation.demand_qty:g} {material.base_unit}，可用库存 "
-                    f"{calculation.available_qty:g}，按期在途 {calculation.open_supply_qty:g}，"
-                    f"为保留安全库存 {calculation.safety_stock_qty:g}，建议补充 "
-                    f"{recommended_qty:g} {material.base_unit}。"
-                ),
+                explanation=ai_explanation or deterministic_explanation,
                 input_digest=input_digest,
                 algorithm_key=ALGORITHM_KEY,
                 algorithm_version=ALGORITHM_VERSION,

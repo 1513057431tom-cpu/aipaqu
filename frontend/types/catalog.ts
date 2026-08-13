@@ -77,6 +77,13 @@ export type AgentConfiguration = {
   updatedAt: string | null
 }
 
+export type ReportTemplate = {
+  period: "DAILY" | "WEEKLY" | "MONTHLY"
+  name: string
+  content: string
+  updatedAt: string | null
+}
+
 export type AgentRunStep = {
   key: string
   name: string
@@ -221,9 +228,12 @@ export type MonitoringSource = {
   scheduleMinutes: number
   signalType: SignalType
   materialId: string | null
+  materialGroupId: string | null
   supplierId: string | null
   extractionSelector: string
-  status: "ACTIVE" | "PAUSED"
+  collectionMode: "HTTP" | "AI_BROWSER"
+  navigationGoal: string
+  status: "ACTIVE" | "PAUSED" | "ARCHIVED"
   lastCollectedAt: string | null
   lastCollectionStatus: "SUCCEEDED" | "FAILED" | "WAITING_HUMAN" | null
   createdAt: string
@@ -274,6 +284,10 @@ export type ExternalSignal = {
   reviewStatus: "PENDING" | "CONFIRMED" | "DISMISSED"
   reviewedBy: string | null
   reviewedAt: string | null
+  summary: string
+  analysisRationale: string
+  analysisModel: string
+  aiAnalyzed: boolean
 }
 
 export type RecommendationCalculation = {

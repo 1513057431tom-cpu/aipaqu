@@ -18,7 +18,14 @@ from app.core.reports import (
     ReportService,
     ReportVersion,
 )
-from app.core.stores import catalog_store, internal_data_store, monitoring_store, recommendation_store, report_store
+from app.core.stores import (
+    agent_service,
+    catalog_store,
+    internal_data_store,
+    monitoring_store,
+    recommendation_store,
+    report_store,
+)
 
 router = APIRouter(prefix="/api/v1/reports", tags=["reports"])
 
@@ -73,7 +80,14 @@ class Pagination(BaseModel):
 
 
 def get_report_service() -> ReportService:
-    return ReportService(report_store, catalog_store, internal_data_store, monitoring_store, recommendation_store)
+    return ReportService(
+        report_store,
+        catalog_store,
+        internal_data_store,
+        monitoring_store,
+        recommendation_store,
+        agent_service,
+    )
 
 
 def to_response(report: Report, version: ReportVersion) -> ReportResponse:
@@ -94,7 +108,16 @@ def to_response(report: Report, version: ReportVersion) -> ReportResponse:
 @router.post("", response_model=ReportResponse, status_code=status.HTTP_201_CREATED)
 def create_report(payload: CreateReportRequest, user: User = Depends(get_current_user), service: ReportService = Depends(get_report_service)) -> ReportResponse:
     try:
-        report, version = service.create(user.workspace_id, user.id, payload.title, payload.reportPeriod, payload.periodStart, payload.periodEnd)
+        template = agent_service.get_report_template(user.workspace_id, payload.reportPeriod.value)
+        report, version = service.create(
+            user.workspace_id,
+            user.id,
+            payload.title,
+            payload.reportPeriod,
+            payload.periodStart,
+            payload.periodEnd,
+            template.content,
+        )
     except PeriodInputIncompleteError as exc:
         raise api_error(409, "PERIOD_INPUT_INCOMPLETE", str(exc), {"missingDates": [d.isoformat() for d in exc.missing_dates]}) from exc
     except DuplicateDailyReportError as exc:

@@ -19,6 +19,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+browser = [
+  "cloakbrowser>=0.5,<1.0",
+]
 dev = [
   "httpx>=0.27,<1.0",
   "pytest>=8.2,<9.0",
