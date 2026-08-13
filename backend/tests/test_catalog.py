@@ -69,6 +69,71 @@ def test_duplicate_material_code_is_rejected() -> None:
     assert duplicate_response.json()["error"]["code"] == "MATERIAL_CODE_CONFLICT"
 
 
+def test_update_material_changes_editable_fields() -> None:
+    client = TestClient(create_app())
+    login(client)
+    created = client.post(
+        "/api/v1/materials",
+        json={
+            "externalCode": "TEST-RM-EDIT-001",
+            "name": "编辑前物料",
+            "baseUnit": "kg",
+            "safetyStockQty": 100,
+            "leadTimeDays": 7,
+        },
+    ).json()
+
+    response = client.patch(
+        f"/api/v1/materials/{created['id']}",
+        json={
+            "externalCode": "TEST-RM-EDIT-002",
+            "name": "编辑后物料",
+            "specification": "25kg/袋",
+            "category": "原材料",
+            "baseUnit": "kg",
+            "safetyStockQty": 250,
+            "leadTimeDays": 12,
+        },
+    )
+
+    assert response.status_code == 200
+    updated = response.json()
+    assert updated["externalCode"] == "TEST-RM-EDIT-002"
+    assert updated["name"] == "编辑后物料"
+    assert updated["safetyStockQty"] == 250
+    assert updated["leadTimeDays"] == 12
+    assert updated["createdAt"] == created["createdAt"]
+    assert updated["updatedAt"] >= created["updatedAt"]
+
+
+def test_update_material_validates_not_found_conflict_and_empty_patch() -> None:
+    client = TestClient(create_app())
+    login(client)
+    first = client.post(
+        "/api/v1/materials",
+        json={"externalCode": "TEST-RM-EDIT-A", "name": "物料 A", "baseUnit": "kg"},
+    ).json()
+    client.post(
+        "/api/v1/materials",
+        json={"externalCode": "TEST-RM-EDIT-B", "name": "物料 B", "baseUnit": "kg"},
+    )
+
+    conflict = client.patch(
+        f"/api/v1/materials/{first['id']}",
+        json={"externalCode": "test-rm-edit-b"},
+    )
+    missing = client.patch("/api/v1/materials/mat_missing", json={"name": "不存在"})
+    empty = client.patch(f"/api/v1/materials/{first['id']}", json={})
+    null_value = client.patch(f"/api/v1/materials/{first['id']}", json={"baseUnit": None})
+
+    assert conflict.status_code == 409
+    assert conflict.json()["error"]["code"] == "MATERIAL_CODE_CONFLICT"
+    assert missing.status_code == 404
+    assert missing.json()["error"]["code"] == "MATERIAL_NOT_FOUND"
+    assert empty.status_code == 422
+    assert null_value.status_code == 422
+
+
 def test_create_and_list_suppliers() -> None:
     client = TestClient(create_app())
     login(client)

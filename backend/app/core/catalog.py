@@ -135,6 +135,19 @@ class InMemoryCatalogStore:
                 None,
             )
 
+    def update_material(self, material: Material) -> Material:
+        with self._lock:
+            existing = self._materials.get(material.id)
+            if existing is None or existing.workspace_id != material.workspace_id:
+                raise LookupError("Material was not found.")
+            self._ensure_material_code_available(
+                material.workspace_id,
+                material.external_code,
+                exclude_id=material.id,
+            )
+            self._materials[material.id] = material
+            return material
+
     def create_supplier(
         self,
         *,
@@ -183,10 +196,16 @@ class InMemoryCatalogStore:
             ]
         return sorted(suppliers, key=lambda item: (item.external_code.casefold(), item.id))
 
-    def _ensure_material_code_available(self, workspace_id: str, external_code: str) -> None:
+    def _ensure_material_code_available(
+        self,
+        workspace_id: str,
+        external_code: str,
+        exclude_id: str | None = None,
+    ) -> None:
         normalized_code = external_code.casefold()
         if any(
             material.workspace_id == workspace_id
+            and material.id != exclude_id
             and material.external_code.casefold() == normalized_code
             for material in self._materials.values()
         ):

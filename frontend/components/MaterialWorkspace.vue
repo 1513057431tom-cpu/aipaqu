@@ -8,7 +8,7 @@
       <button
         class="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-emerald-700 px-4 text-sm font-medium text-white hover:bg-emerald-800"
         type="button"
-        @click="showForm = !showForm"
+        @click="toggleCreateForm"
       >
         <X v-if="showForm" :size="17" aria-hidden="true" />
         <Plus v-else :size="17" aria-hidden="true" />
@@ -21,6 +21,10 @@
       class="grid gap-4 border-y border-slate-200 bg-white py-5 md:grid-cols-2 xl:grid-cols-4"
       @submit.prevent="submitMaterial"
     >
+      <div class="md:col-span-2 xl:col-span-4">
+        <h3 class="font-semibold text-slate-900">{{ editingId ? "编辑物料" : "新建物料" }}</h3>
+        <p v-if="editingId" class="mt-1 text-xs text-slate-500">修改会更新当前主数据，不改写已有库存和报告快照。</p>
+      </div>
       <label class="block text-sm">
         <span class="font-medium text-slate-700">物料编码</span>
         <input v-model="form.externalCode" class="field" maxlength="80" required>
@@ -55,7 +59,7 @@
           :disabled="saving"
           type="submit"
         >
-          {{ saving ? "保存中..." : "保存物料" }}
+          {{ saving ? "保存中..." : editingId ? "保存修改" : "保存物料" }}
         </button>
       </div>
       <p v-if="formError" class="text-sm text-red-700 md:col-span-2 xl:col-span-4" role="alert">
@@ -108,7 +112,7 @@
         <p class="mt-1 text-sm text-slate-500">新建物料或从 CSV 导入。</p>
       </div>
       <div v-else class="overflow-x-auto">
-        <table class="w-full min-w-[880px] table-fixed text-left text-sm">
+        <table class="w-full min-w-[960px] table-fixed text-left text-sm">
           <thead class="border-b border-slate-200 bg-slate-50 text-xs font-medium text-slate-500">
             <tr>
               <th class="w-36 px-4 py-3">编码</th>
@@ -118,6 +122,7 @@
               <th class="w-24 px-4 py-3 text-right">安全库存</th>
               <th class="w-24 px-4 py-3 text-right">交期</th>
               <th class="w-24 px-4 py-3">状态</th>
+              <th class="w-16 px-4 py-3 text-right">操作</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
@@ -129,6 +134,17 @@
               <td class="px-4 py-3 text-right tabular-nums">{{ formatQuantity(material.safetyStockQty) }} {{ material.baseUnit }}</td>
               <td class="px-4 py-3 text-right tabular-nums">{{ material.leadTimeDays }} 天</td>
               <td class="px-4 py-3"><span class="status-active">启用</span></td>
+              <td class="px-4 py-3 text-right">
+                <button
+                  class="icon-button"
+                  :title="`编辑 ${material.externalCode}`"
+                  type="button"
+                  @click="startEditing(material)"
+                >
+                  <Pencil :size="16" aria-hidden="true" />
+                  <span class="sr-only">编辑 {{ material.externalCode }}</span>
+                </button>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -138,7 +154,7 @@
 </template>
 
 <script setup lang="ts">
-import { LoaderCircle, PackageOpen, Plus, RefreshCw, Search, X } from "lucide-vue-next"
+import { LoaderCircle, PackageOpen, Pencil, Plus, RefreshCw, Search, X } from "lucide-vue-next"
 
 import type { ListEnvelope, Material } from "~/types/catalog"
 
@@ -151,6 +167,7 @@ const query = ref("")
 const loading = ref(true)
 const saving = ref(false)
 const showForm = ref(false)
+const editingId = ref("")
 const loadError = ref("")
 const formError = ref("")
 const successMessage = ref("")
@@ -185,17 +202,13 @@ async function submitMaterial() {
   formError.value = ""
   successMessage.value = ""
   try {
-    await request<Material>("/api/v1/materials", { method: "POST", body: form })
-    successMessage.value = `物料 ${form.externalCode.trim()} 已创建。`
-    Object.assign(form, {
-      externalCode: "",
-      name: "",
-      specification: "",
-      category: "",
-      baseUnit: "kg",
-      safetyStockQty: 0,
-      leadTimeDays: 0,
+    const isEditing = Boolean(editingId.value)
+    await request<Material>(isEditing ? `/api/v1/materials/${editingId.value}` : "/api/v1/materials", {
+      method: isEditing ? "PATCH" : "POST",
+      body: form,
     })
+    successMessage.value = `物料 ${form.externalCode.trim()} 已${isEditing ? "更新" : "创建"}。`
+    resetForm()
     showForm.value = false
     await refreshMaterials()
     emit("changed")
@@ -204,6 +217,47 @@ async function submitMaterial() {
   } finally {
     saving.value = false
   }
+}
+
+function toggleCreateForm() {
+  if (showForm.value) {
+    showForm.value = false
+    resetForm()
+    return
+  }
+  resetForm()
+  showForm.value = true
+}
+
+function startEditing(material: Material) {
+  editingId.value = material.id
+  Object.assign(form, {
+    externalCode: material.externalCode,
+    name: material.name,
+    specification: material.specification,
+    category: material.category,
+    baseUnit: material.baseUnit,
+    safetyStockQty: material.safetyStockQty,
+    leadTimeDays: material.leadTimeDays,
+  })
+  formError.value = ""
+  successMessage.value = ""
+  showForm.value = true
+  window.scrollTo({ top: 0, behavior: "smooth" })
+}
+
+function resetForm() {
+  editingId.value = ""
+  formError.value = ""
+  Object.assign(form, {
+    externalCode: "",
+    name: "",
+    specification: "",
+    category: "",
+    baseUnit: "kg",
+    safetyStockQty: 0,
+    leadTimeDays: 0,
+  })
 }
 
 function formatQuantity(value: number) {
@@ -220,5 +274,9 @@ onMounted(refreshMaterials)
 
 .status-active {
   @apply inline-flex rounded bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700;
+}
+
+.icon-button {
+  @apply inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-slate-600 hover:bg-slate-100 hover:text-slate-900;
 }
 </style>

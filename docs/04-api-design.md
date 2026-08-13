@@ -181,6 +181,8 @@ MVP 支持：
 | POST | `/entity-mapping-candidates/{candidateId}/confirm` | 确认映射 |
 | POST | `/entity-mapping-candidates/{candidateId}/reject` | 拒绝映射 |
 
+物料更新可修改编码、名称、规格、分类、基础单位、安全库存和参考交期。空请求或显式 `null` 返回 `422`；编码冲突返回 `409 MATERIAL_CODE_CONFLICT`；不存在或跨工作空间访问返回 `404 MATERIAL_NOT_FOUND`。历史库存、建议和报告快照不会随主数据修改而改写。
+
 `MaterialResponse`：
 
 ```json

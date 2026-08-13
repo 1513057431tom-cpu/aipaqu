@@ -2,14 +2,22 @@ from __future__ import annotations
 
 import csv
 import io
-from datetime import datetime
+from dataclasses import replace
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import TypeVar
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
-from pydantic import AnyHttpUrl, BaseModel, Field, ValidationError, field_validator
+from pydantic import (
+    AnyHttpUrl,
+    BaseModel,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from app.core.auth import User, get_current_user
 from app.core.catalog import (
@@ -61,6 +69,39 @@ class CreateMaterialRequest(BaseModel):
     @classmethod
     def strip_optional_text(cls, value: str) -> str:
         return value.strip()
+
+
+class UpdateMaterialRequest(BaseModel):
+    externalCode: str | None = Field(default=None, min_length=1, max_length=80)
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    specification: str | None = Field(default=None, max_length=500)
+    category: str | None = Field(default=None, max_length=120)
+    baseUnit: str | None = Field(default=None, min_length=1, max_length=32)
+    safetyStockQty: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    leadTimeDays: int | None = Field(default=None, ge=0, le=3650)
+
+    @field_validator("externalCode", "name", "baseUnit")
+    @classmethod
+    def strip_required_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("Value must not be blank.")
+        return stripped
+
+    @field_validator("specification", "category")
+    @classmethod
+    def strip_optional_text(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else None
+
+    @model_validator(mode="after")
+    def require_change(self) -> "UpdateMaterialRequest":
+        if not self.model_fields_set:
+            raise ValueError("At least one field must be provided.")
+        if any(getattr(self, field_name) is None for field_name in self.model_fields_set):
+            raise ValueError("Updated fields must not be null.")
+        return self
 
 
 class MaterialResponse(BaseModel):
@@ -251,6 +292,42 @@ def post_material(
     user: User = Depends(get_current_user),
 ) -> MaterialResponse:
     return material_to_response(create_material(payload, user))
+
+
+@router.patch("/materials/{material_id}", response_model=MaterialResponse)
+def patch_material(
+    material_id: str,
+    payload: UpdateMaterialRequest,
+    user: User = Depends(get_current_user),
+) -> MaterialResponse:
+    existing = catalog_store.get_material(user.workspace_id, material_id)
+    if existing is None:
+        raise api_error(
+            status.HTTP_404_NOT_FOUND,
+            "MATERIAL_NOT_FOUND",
+            "Material was not found.",
+        )
+    fields = payload.model_dump(exclude_unset=True)
+    field_names = {
+        "externalCode": "external_code",
+        "name": "name",
+        "specification": "specification",
+        "category": "category",
+        "baseUnit": "base_unit",
+        "safetyStockQty": "safety_stock_qty",
+        "leadTimeDays": "lead_time_days",
+    }
+    changes = {field_names[key]: value for key, value in fields.items()}
+    updated = replace(existing, **changes, updated_at=datetime.now(timezone.utc))
+    try:
+        return material_to_response(catalog_store.update_material(updated))
+    except DuplicateCatalogCodeError as exc:
+        raise api_error(
+            status.HTTP_409_CONFLICT,
+            "MATERIAL_CODE_CONFLICT",
+            "A material with this external code already exists.",
+            {"externalCode": updated.external_code},
+        ) from exc
 
 
 @router.get("/suppliers", response_model=SupplierListResponse)

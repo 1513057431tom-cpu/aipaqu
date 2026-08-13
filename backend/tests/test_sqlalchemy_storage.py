@@ -55,6 +55,19 @@ def test_catalog_records_survive_repository_recreation() -> None:
     assert loaded.external_code == "DB-MAT-001"
     assert loaded.status == CatalogStatus.ACTIVE
 
+    updated = second_store.update_material(
+        replace(
+            loaded,
+            name="Updated database material",
+            safety_stock_qty=750,
+            updated_at=datetime(2026, 8, 13, 3, 0, tzinfo=timezone.utc),
+        )
+    )
+    recreated = SqlAlchemyCatalogStore(engine).get_material("storage-test", material.id)
+
+    assert updated.name == "Updated database material"
+    assert recreated == updated
+
 
 def test_internal_snapshots_survive_repository_recreation() -> None:
     engine = create_test_engine()

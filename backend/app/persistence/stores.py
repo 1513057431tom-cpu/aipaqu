@@ -207,6 +207,35 @@ class SqlAlchemyCatalogStore:
             )
         return material_from_model(model) if model else None
 
+    def update_material(self, material: Material) -> Material:
+        with Session(self.engine) as session:
+            model = session.scalar(
+                select(MaterialModel).where(
+                    MaterialModel.workspace_id == material.workspace_id,
+                    MaterialModel.id == material.id,
+                )
+            )
+            if model is None:
+                raise LookupError("Material was not found.")
+            model.external_code = material.external_code
+            model.external_code_key = material.external_code.casefold()
+            model.name = material.name
+            model.specification = material.specification
+            model.category = material.category
+            model.base_unit = material.base_unit
+            model.safety_stock_qty = material.safety_stock_qty
+            model.lead_time_days = material.lead_time_days
+            model.updated_at = utc_naive(material.updated_at)
+            try:
+                session.commit()
+            except IntegrityError as exc:
+                session.rollback()
+                raise DuplicateCatalogCodeError(
+                    "Material external code already exists."
+                ) from exc
+            session.refresh(model)
+            return material_from_model(model)
+
     def create_supplier(
         self,
         *,
