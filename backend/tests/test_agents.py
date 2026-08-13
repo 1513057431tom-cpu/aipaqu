@@ -63,3 +63,66 @@ def test_live_run_requires_deepseek_configuration() -> None:
 
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "MODEL_NOT_CONFIGURED"
+
+
+def test_admin_can_save_model_configuration_without_reading_api_key_back() -> None:
+    client = TestClient(create_app())
+    login(client)
+
+    response = client.put(
+        "/api/v1/model-configuration",
+        json={
+            "provider": "DEEPSEEK",
+            "model": "deepseek-reasoner",
+            "baseUrl": "https://api.deepseek.com",
+            "apiKey": "sk-test-secret-1234",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["provider"] == "DEEPSEEK"
+    assert body["model"] == "deepseek-reasoner"
+    assert body["apiKeyConfigured"] is True
+    assert body["apiKeyMasked"] == "********1234"
+    assert "apiKey" not in body
+
+    saved = client.get("/api/v1/model-configuration")
+    assert saved.status_code == 200
+    assert saved.json() == body
+
+
+def test_admin_can_update_material_monitor_agent_configuration() -> None:
+    client = TestClient(create_app())
+    login(client)
+
+    response = client.patch(
+        "/api/v1/agents/material-monitor/configuration",
+        json={
+            "systemPrompt": "只根据可追溯证据分析物料变化，不得编造事实。",
+            "defaultExecutionMode": "LIVE",
+            "toolKeys": ["material_catalog", "evidence_store"],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["systemPrompt"].startswith("只根据可追溯证据")
+    assert body["defaultExecutionMode"] == "LIVE"
+    assert body["toolKeys"] == ["material_catalog", "evidence_store"]
+
+    saved = client.get("/api/v1/agents/material-monitor/configuration")
+    assert saved.status_code == 200
+    assert saved.json() == body
+
+
+def test_agent_configuration_rejects_unknown_tools() -> None:
+    client = TestClient(create_app())
+    login(client)
+
+    response = client.patch(
+        "/api/v1/agents/material-monitor/configuration",
+        json={"toolKeys": ["shell_access"]},
+    )
+
+    assert response.status_code == 422

@@ -386,3 +386,27 @@ class AgentRunModel(Base):
     error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime())
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(), nullable=True)
+
+
+class ModelConfigurationModel(Base):
+    __tablename__ = "model_configurations"
+
+    workspace_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(32))
+    model: Mapped[str] = mapped_column(String(120))
+    base_url: Mapped[str] = mapped_column(String(500))
+    encrypted_api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime())
+
+
+class AgentConfigurationModel(Base):
+    __tablename__ = "agent_configurations"
+    __table_args__ = (UniqueConstraint("workspace_id", "agent_key"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
+    agent_key: Mapped[str] = mapped_column(String(80))
+    system_prompt: Mapped[str] = mapped_column(Text)
+    default_execution_mode: Mapped[str] = mapped_column(String(16))
+    tool_keys_json: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime())

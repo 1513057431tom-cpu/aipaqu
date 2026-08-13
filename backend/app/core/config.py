@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     )
     dev_admin_email: str = Field(default="admin@example.com", alias="DEV_ADMIN_EMAIL")
     dev_admin_password: str = Field(default="change-me-now", alias="DEV_ADMIN_PASSWORD")
+    master_encryption_key: SecretStr | None = Field(default=None, alias="MASTER_ENCRYPTION_KEY")
 
     mysql_host: str = Field(default="localhost", alias="MYSQL_HOST")
     mysql_port: int = Field(default=3306, alias="MYSQL_PORT")

@@ -5,6 +5,7 @@ description = "FastAPI backend for the intelligent intelligence and periodic rep
 requires-python = ">=3.10"
 dependencies = [
   "alembic>=1.13,<2.0",
+  "cryptography>=42,<47",
   "fastapi>=0.111,<1.0",
   "langchain>=1.0,<2.0",
   "langchain-deepseek>=1.0,<2.0",

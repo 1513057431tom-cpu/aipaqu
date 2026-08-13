@@ -51,6 +51,32 @@ export type AgentDefinition = {
   toolKeys: string[]
 }
 
+export type ModelConfiguration = {
+  provider: "DEEPSEEK"
+  model: string
+  baseUrl: string
+  apiKeyConfigured: boolean
+  apiKeyMasked: string | null
+  updatedAt: string | null
+}
+
+export type ModelConnectionTest = {
+  success: boolean
+  provider: "DEEPSEEK"
+  model: string
+  latencyMs: number
+  message: string
+}
+
+export type AgentConfiguration = {
+  agentKey: string
+  systemPrompt: string
+  defaultExecutionMode: "TEST" | "LIVE"
+  toolKeys: string[]
+  availableToolKeys: string[]
+  updatedAt: string | null
+}
+
 export type AgentRunStep = {
   key: string
   name: string

@@ -26,6 +26,29 @@ class ModelNotConfiguredError(RuntimeError):
     pass
 
 
+ALLOWED_TOOL_KEYS = ("material_catalog", "monitoring_sources", "evidence_store")
+
+
+@dataclass(frozen=True)
+class ModelConfiguration:
+    workspace_id: str
+    provider: str
+    model: str
+    base_url: str
+    api_key: str | None
+    updated_at: datetime | None
+
+
+@dataclass(frozen=True)
+class AgentConfiguration:
+    workspace_id: str
+    agent_key: str
+    system_prompt: str
+    default_execution_mode: ExecutionMode
+    tool_keys: tuple[str, ...]
+    updated_at: datetime | None
+
+
 @dataclass(frozen=True)
 class AgentDefinition:
     key: str
@@ -83,9 +106,41 @@ AGENT_DEFINITIONS = (
         provider="DEEPSEEK",
         model="deepseek-chat",
         workflow_version="1.0.0",
-        tool_keys=("material_catalog", "monitoring_sources", "evidence_store"),
+        tool_keys=ALLOWED_TOOL_KEYS,
     ),
 )
+
+DEFAULT_SYSTEM_PROMPT = (
+    "你是物料监测分析 Agent。只能依据可追溯证据识别价格、规格、可用性和交期变化；"
+    "证据不足时必须明确说明，不得编造事实或替代人工采购决策。"
+)
+
+
+class InMemoryAgentConfigurationStore:
+    def __init__(self) -> None:
+        self._models: dict[str, ModelConfiguration] = {}
+        self._agents: dict[tuple[str, str], AgentConfiguration] = {}
+        self._lock = RLock()
+
+    def get_model_configuration(self, workspace_id: str) -> ModelConfiguration | None:
+        with self._lock:
+            return self._models.get(workspace_id)
+
+    def save_model_configuration(self, configuration: ModelConfiguration) -> ModelConfiguration:
+        with self._lock:
+            self._models[configuration.workspace_id] = configuration
+        return configuration
+
+    def get_agent_configuration(
+        self, workspace_id: str, agent_key: str
+    ) -> AgentConfiguration | None:
+        with self._lock:
+            return self._agents.get((workspace_id, agent_key))
+
+    def save_agent_configuration(self, configuration: AgentConfiguration) -> AgentConfiguration:
+        with self._lock:
+            self._agents[(configuration.workspace_id, configuration.agent_key)] = configuration
+        return configuration
 
 
 class InMemoryAgentRunStore:
@@ -113,10 +168,18 @@ def _completed_step(key: str, name: str, detail: str) -> dict[str, str]:
 
 
 class MaterialMonitoringWorkflow:
-    def __init__(self, *, api_key: str | None, base_url: str, model: str) -> None:
+    def __init__(
+        self,
+        *,
+        api_key: str | None,
+        base_url: str,
+        model: str,
+        system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+    ) -> None:
         self.api_key = api_key
         self.base_url = base_url
         self.model = model
+        self.system_prompt = system_prompt
         graph = StateGraph(WorkflowState)
         graph.add_node("load_scope", self._load_scope)
         graph.add_node("collect_evidence", self._collect_evidence)
@@ -169,9 +232,7 @@ class MaterialMonitoringWorkflow:
                 model=self.model,
                 temperature=0,
             ).with_structured_output(MaterialAnalysis)
-            result = llm.invoke(
-                "分析当前物料监测批次。若没有证据，只能说明证据不足，不得编造价格、库存或供应变化。"
-            )
+            result = llm.invoke(self.system_prompt)
             summary = result.summary
             invoked = True
             detail = f"DeepSeek 返回 {len(result.findings)} 条结构化发现"
@@ -196,12 +257,42 @@ class MaterialMonitoringWorkflow:
 
 
 class AgentService:
-    def __init__(self, run_store, workflow: MaterialMonitoringWorkflow) -> None:
+    def __init__(
+        self,
+        run_store,
+        configuration_store,
+        default_model_configuration: ModelConfiguration,
+    ) -> None:
         self.run_store = run_store
-        self.workflow = workflow
+        self.configuration_store = configuration_store
+        self.default_model_configuration = default_model_configuration
 
     def list_definitions(self) -> tuple[AgentDefinition, ...]:
         return AGENT_DEFINITIONS
+
+    def get_model_configuration(self, workspace_id: str) -> ModelConfiguration:
+        return (
+            self.configuration_store.get_model_configuration(workspace_id)
+            or self.default_model_configuration
+        )
+
+    def save_model_configuration(self, configuration: ModelConfiguration) -> ModelConfiguration:
+        return self.configuration_store.save_model_configuration(configuration)
+
+    def get_agent_configuration(self, workspace_id: str, agent_key: str) -> AgentConfiguration:
+        return self.configuration_store.get_agent_configuration(
+            workspace_id, agent_key
+        ) or AgentConfiguration(
+            workspace_id=workspace_id,
+            agent_key=agent_key,
+            system_prompt=DEFAULT_SYSTEM_PROMPT,
+            default_execution_mode=ExecutionMode.TEST,
+            tool_keys=ALLOWED_TOOL_KEYS,
+            updated_at=None,
+        )
+
+    def save_agent_configuration(self, configuration: AgentConfiguration) -> AgentConfiguration:
+        return self.configuration_store.save_agent_configuration(configuration)
 
     def run_material_monitor(
         self,
@@ -210,12 +301,20 @@ class AgentService:
         execution_mode: ExecutionMode,
         material_ids: list[str],
     ) -> AgentRun:
-        if execution_mode == ExecutionMode.LIVE and not self.workflow.api_key:
+        model_configuration = self.get_model_configuration(workspace_id)
+        agent_configuration = self.get_agent_configuration(workspace_id, "material-monitor")
+        workflow = MaterialMonitoringWorkflow(
+            api_key=model_configuration.api_key,
+            base_url=model_configuration.base_url,
+            model=model_configuration.model,
+            system_prompt=agent_configuration.system_prompt,
+        )
+        if execution_mode == ExecutionMode.LIVE and not workflow.api_key:
             raise ModelNotConfiguredError("DeepSeek API key is not configured.")
         started_at = datetime.now(timezone.utc)
         run_id = self.run_store.next_id()
         try:
-            state = self.workflow.invoke(material_ids=material_ids, execution_mode=execution_mode)
+            state = workflow.invoke(material_ids=material_ids, execution_mode=execution_mode)
             run = AgentRun(
                 id=run_id,
                 workspace_id=workspace_id,
@@ -243,7 +342,7 @@ class AgentService:
                 model_invoked=False,
                 summary="",
                 error_code="AGENT_RUN_FAILED",
-                error_message=str(exc)[:500],
+                error_message=f"Agent execution failed ({type(exc).__name__}).",
                 started_at=started_at,
                 finished_at=datetime.now(timezone.utc),
             )
