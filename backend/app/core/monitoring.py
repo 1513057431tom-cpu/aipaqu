@@ -319,6 +319,8 @@ class SafeHttpFetcher:
 
 
 class _TextExtractor(HTMLParser):
+    _ignored_tags = {"script", "style", "template", "noscript", "svg"}
+
     def __init__(self, selector: str) -> None:
         super().__init__(convert_charrefs=True)
         self.selector = selector.strip()
@@ -327,9 +329,12 @@ class _TextExtractor(HTMLParser):
         self.text_parts: list[str] = []
         self.title_parts: list[str] = []
         self.in_title = False
+        self.ignored_depth = 0
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         self.depth += 1
+        if tag in self._ignored_tags:
+            self.ignored_depth += 1
         attributes = dict(attrs)
         if tag == "title":
             self.in_title = True
@@ -341,9 +346,13 @@ class _TextExtractor(HTMLParser):
             self.in_title = False
         if self.capture_depth == self.depth:
             self.capture_depth = None
+        if tag in self._ignored_tags and self.ignored_depth:
+            self.ignored_depth -= 1
         self.depth = max(0, self.depth - 1)
 
     def handle_data(self, data: str) -> None:
+        if self.ignored_depth:
+            return
         value = " ".join(data.split())
         if not value:
             return

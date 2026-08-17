@@ -1,11 +1,18 @@
-from datetime import date
+import json
+from datetime import date, datetime, timezone
 from io import BytesIO
 
 from docx import Document
 from fastapi.testclient import TestClient
 
 from app.api.routes.reports import get_report_service
-from app.core.reports import InMemoryReportStore, ReportService
+from app.core.reports import (
+    DailyIntelligenceSnapshot,
+    InMemoryReportStore,
+    ReportPeriod,
+    ReportService,
+    SnapshotStatus,
+)
 from app.main import create_app
 
 
@@ -24,6 +31,12 @@ class CountingMonitoringStore:
     def list_signals(self, _workspace_id: str):
         self.calls += 1
         return []
+
+
+class UnsafeReportAgent:
+    @staticmethod
+    def write_report(_workspace_id: str, _payload: dict) -> str:
+        return "# AI 日报\n\n信号 signal-1，证据 /api/v1/documents/document-1。"
 
 
 def report_client() -> tuple[TestClient, InMemoryReportStore, CountingMonitoringStore]:
@@ -69,6 +82,128 @@ def test_weekly_report_lists_missing_daily_inputs_without_collecting() -> None:
         "2026-08-16",
     ]
     assert monitoring.calls == 0
+
+
+def test_daily_report_marks_pending_intelligence_as_unconfirmed() -> None:
+    snapshot = DailyIntelligenceSnapshot(
+        id="daily-1",
+        workspace_id="default",
+        covered_date=date(2026, 8, 14),
+        timezone="Asia/Shanghai",
+        structured_data_json=json.dumps(
+            {
+                "inventoryCount": 1,
+                "demandCount": 0,
+                "openSupplyCount": 0,
+                "confirmedSignals": [],
+                "pendingSignals": [
+                    {
+                        "id": "signal-1",
+                        "materialId": "material-1",
+                        "summary": "公开报价可能上涨，等待人工确认。",
+                        "evidenceRef": "/api/v1/documents/document-1",
+                    }
+                ],
+                "recommendations": [],
+            },
+            ensure_ascii=False,
+        ),
+        content_digest="digest",
+        status=SnapshotStatus.READY,
+        approved_by=None,
+        approved_at=None,
+        created_at=datetime.now(timezone.utc),
+    )
+
+    markdown = ReportService._markdown(
+        "物料情报日报",
+        ReportPeriod.DAILY,
+        date(2026, 8, 14),
+        date(2026, 8, 14),
+        [snapshot],
+    )
+
+    assert "待人工复核情报：1" in markdown
+    assert "[待复核] `material-1` 公开报价可能上涨" in markdown
+    assert "待复核外部信号 `signal-1`" in markdown
+
+
+def test_ai_report_without_pending_marker_falls_back_to_deterministic_draft() -> None:
+    snapshot = DailyIntelligenceSnapshot(
+        id="daily-unsafe",
+        workspace_id="default",
+        covered_date=date(2026, 8, 14),
+        timezone="Asia/Shanghai",
+        structured_data_json=json.dumps(
+            {
+                "inventoryCount": 0,
+                "demandCount": 0,
+                "openSupplyCount": 0,
+                "confirmedSignals": [],
+                "pendingSignals": [
+                    {
+                        "id": "signal-1",
+                        "materialId": "material-1",
+                        "summary": "价格可能上涨。",
+                        "evidenceRef": "/api/v1/documents/document-1",
+                    }
+                ],
+                "recommendations": [],
+            },
+            ensure_ascii=False,
+        ),
+        content_digest="digest",
+        status=SnapshotStatus.READY,
+        approved_by=None,
+        approved_at=None,
+        created_at=datetime.now(timezone.utc),
+    )
+    service = ReportService(None, None, None, None, None, UnsafeReportAgent())
+
+    markdown = service._render_markdown(
+        "default",
+        "物料情报日报",
+        ReportPeriod.DAILY,
+        date(2026, 8, 14),
+        date(2026, 8, 14),
+        [snapshot],
+        None,
+    )
+
+    assert markdown.startswith("# 物料情报日报")
+    assert "待人工复核情报：1" in markdown
+
+
+def test_draft_daily_report_can_be_refreshed_without_creating_a_duplicate() -> None:
+    from app.core.stores import catalog_store, internal_data_store, recommendation_store
+
+    store = InMemoryReportStore()
+    service = ReportService(
+        store,
+        catalog_store,
+        internal_data_store,
+        CountingMonitoringStore(),
+        recommendation_store,
+    )
+    report, version = service.create(
+        "default",
+        "user-1",
+        "物料情报日报",
+        ReportPeriod.DAILY,
+        date(2026, 8, 14),
+        date(2026, 8, 14),
+    )
+
+    refreshed, refreshed_version = service.refresh_daily(
+        "default",
+        report.id,
+        "user-1",
+    )
+
+    assert refreshed.id == report.id
+    assert refreshed_version.version == version.version + 1
+    assert len(store.list("default")) == 1
+    assert store.get_daily_snapshot("default", date(2026, 8, 14)) is not None
 
 
 def test_daily_reports_aggregate_to_weekly_and_export_approved_version() -> None:

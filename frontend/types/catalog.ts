@@ -364,6 +364,8 @@ export type CollectionResult = {
   job: CollectionJob
   document: EvidenceDocument | null
   signal: ExternalSignal | null
+  downstreamStatus: "QUEUED" | "SKIPPED"
+  downstreamMessage: string
 }
 
 export type WorkspaceView =

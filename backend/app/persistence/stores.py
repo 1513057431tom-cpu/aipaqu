@@ -1128,6 +1128,28 @@ class SqlAlchemyReportStore:
             session.commit()
         return report
 
+    def refresh_daily(
+        self,
+        report: Report,
+        version: ReportVersion,
+        snapshot: DailyIntelligenceSnapshot,
+    ) -> Report:
+        with Session(self.engine) as session:
+            model = session.get(ReportModel, report.id)
+            snapshot_model = session.get(DailyIntelligenceSnapshotModel, snapshot.id)
+            if model is None or snapshot_model is None:
+                raise LookupError("Daily report or snapshot was not found.")
+            model.current_version_id = report.current_version_id
+            model.updated_at = utc_naive(report.updated_at)
+            snapshot_model.structured_data_json = snapshot.structured_data_json
+            snapshot_model.content_digest = snapshot.content_digest
+            snapshot_model.status = snapshot.status.value
+            snapshot_model.approved_by = snapshot.approved_by
+            snapshot_model.approved_at = None
+            session.add(self._version_model(version))
+            session.commit()
+        return report
+
     def approve(
         self,
         report: Report,

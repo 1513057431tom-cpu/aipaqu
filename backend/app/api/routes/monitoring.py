@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response, status
 from pydantic import BaseModel, Field, HttpUrl, model_validator
 
 from app.core.auth import User, get_current_user
@@ -12,6 +12,7 @@ from app.core.monitoring import (
     CollectionJob,
     CollectionMode,
     CollectionResult,
+    CollectionStatus,
     Document,
     DuplicateSourceUrlError,
     ExternalSignal,
@@ -23,7 +24,17 @@ from app.core.monitoring import (
     validate_public_url,
 )
 from app.core.browser_collection import CloakBrowserFetcher, LangChainSignalAnalyzer
-from app.core.stores import agent_service, catalog_store, monitoring_store
+from app.core.intelligence_pipeline import IntelligencePipelineService
+from app.core.recommendations import PlanningEngine
+from app.core.reports import ReportService
+from app.core.stores import (
+    agent_service,
+    catalog_store,
+    internal_data_store,
+    monitoring_store,
+    recommendation_store,
+    report_store,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["monitoring"])
 
@@ -158,6 +169,8 @@ class CollectionResultResponse(BaseModel):
     job: CollectionJobResponse
     document: DocumentResponse | None
     signal: ExternalSignalResponse | None
+    downstreamStatus: str
+    downstreamMessage: str
 
 
 def get_monitoring_service() -> MonitoringService:
@@ -165,6 +178,30 @@ def get_monitoring_service() -> MonitoringService:
         monitoring_store,
         browser_fetcher=CloakBrowserFetcher(agent_service, catalog_store),
         signal_analyzer=LangChainSignalAnalyzer(agent_service, catalog_store),
+    )
+
+
+def get_intelligence_pipeline() -> IntelligencePipelineService:
+    planning_engine = PlanningEngine(
+        catalog_store,
+        internal_data_store,
+        monitoring_store,
+        recommendation_store,
+        agent_service,
+    )
+    report_service = ReportService(
+        report_store,
+        catalog_store,
+        internal_data_store,
+        monitoring_store,
+        recommendation_store,
+        agent_service,
+    )
+    return IntelligencePipelineService(
+        planning_engine,
+        report_service,
+        report_store,
+        agent_service,
     )
 
 
@@ -380,17 +417,32 @@ def list_sources(
 @router.post("/sources/{source_id}/collect", response_model=CollectionResultResponse)
 def collect_source(
     source_id: str,
+    background_tasks: BackgroundTasks,
     user: User = Depends(get_current_user),
     service: MonitoringService = Depends(get_monitoring_service),
+    pipeline: IntelligencePipelineService = Depends(get_intelligence_pipeline),
 ) -> CollectionResultResponse:
     try:
         result: CollectionResult = service.collect(user.workspace_id, source_id)
     except LookupError as exc:
         raise api_error(404, "SOURCE_NOT_FOUND", "Source was not found.") from exc
+    downstream_status = "SKIPPED"
+    downstream_message = "采集未成功，下游分析未启动。"
+    if result.job.status == CollectionStatus.SUCCEEDED and result.document is not None:
+        background_tasks.add_task(
+            pipeline.run,
+            user.workspace_id,
+            user.id,
+            result.document.collected_at,
+        )
+        downstream_status = "QUEUED"
+        downstream_message = "采购建议测算和当日情报报告已进入后台生成队列。"
     return CollectionResultResponse(
         job=job_response(result.job),
         document=document_response(result.document) if result.document else None,
         signal=signal_response(result.signal) if result.signal else None,
+        downstreamStatus=downstream_status,
+        downstreamMessage=downstream_message,
     )
 
 

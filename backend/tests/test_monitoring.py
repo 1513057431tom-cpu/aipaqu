@@ -8,6 +8,7 @@ from app.core.monitoring import (
     FetchResult,
     MonitoringService,
     SignalAnalysis,
+    extract_html,
     run_due_collections,
     validate_public_url,
 )
@@ -94,6 +95,22 @@ def test_public_url_validation_blocks_private_and_mismatched_hosts() -> None:
             raise AssertionError(f"Expected URL to be rejected: {url}")
 
 
+def test_html_extraction_ignores_script_style_and_template_content() -> None:
+    title, text = extract_html(
+        b"""
+        <html><head><title>Price board</title><style>.price { color: red; }</style></head>
+        <body><script>window.secretNoise = 'ignore me';</script>
+        <main><h1>Material A</h1><p>Price: 115 CNY</p>
+        <template>hidden template text</template></main></body></html>
+        """,
+        "main",
+        "text/html; charset=utf-8",
+    )
+
+    assert title == "Price board"
+    assert text == "Material A Price: 115 CNY"
+
+
 def test_collection_creates_baseline_then_change_signal_with_evidence() -> None:
     app = create_app()
     fetcher = SequenceFetcher(
@@ -142,6 +159,7 @@ def test_collection_creates_baseline_then_change_signal_with_evidence() -> None:
     assert baseline.status_code == 200
     assert baseline.json()["job"]["status"] == "SUCCEEDED"
     assert baseline.json()["signal"] is None
+    assert baseline.json()["downstreamStatus"] == "QUEUED"
     assert changed.status_code == 200
     assert changed.json()["job"]["status"] == "SUCCEEDED"
     assert changed.json()["signal"]["signalType"] == "PRICE"
